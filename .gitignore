@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Environment — never commit real credentials, only .env.example
+.env
+.env.*
+!.env.example
+
+# Expo / React Native
+app/.expo/
+app/android/
+app/ios/
+*.apk
+*.aab
+*.keystore
+!debug.keystore
+
+# Server runtime data — the image store and SQLite database are local state
+server/data/
+server/images/
+*.sqlite
+*.sqlite-journal
+*.db
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
