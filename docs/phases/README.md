@@ -9,6 +9,10 @@ what is scattered across it (the screen section, the stack section, the API tabl
 checkable list per phase, and they name the judgement calls that had to be made to get there. Every such
 call is recorded in [`../decisions.md`](../decisions.md).
 
+Where the plan meets the real deployment box, it changed:
+[`../deployment-target.md`](../deployment-target.md) records what is actually on that machine and which
+assumptions it invalidated.
+
 ## How to read a phase document
 
 Every one has the same sections, so they can be compared and so nothing quietly goes missing:
@@ -148,7 +152,7 @@ they are constraints rather than work, repeated in the Global constraints table 
 | SQLite via `better-sqlite3` with Drizzle | [02](02-server-images.md) |
 | `sharp` for all decoding, resizing, normalisation; no pure-JS image libraries | [02](02-server-images.md) |
 | Docker Compose, `node:22-slim` | [02](02-server-images.md) |
-| Caddy for automatic TLS on `scanner.yo-po.eu` | [02](02-server-images.md) |
+| Automatic TLS on `scanner.yo-po.eu` — **nginx vhost + certbot, not Caddy** ([ADR-17](../decisions.md#adr-17--nginx-and-certbot-instead-of-caddy)) | [02](02-server-images.md) |
 | Bearer-token auth on everything except `/health` | [02](02-server-images.md) |
 | Path constructed from image ID; client paths never reach a filesystem read; containment verified | [02](02-server-images.md) |
 | Pre-built OCR sidecar (`rapidocr_api` default; not `paddlecloud/paddleocr`); pinned by digest | [07](07-ocr-sidecar.md) |
@@ -214,7 +218,8 @@ All ten, each with an owner.
 
 Not blocking this plan, but blocking the phases they belong to.
 
-| Question | Blocks |
-|---|---|
-| Is there SSH access to the Hetzner box, does `scanner.yo-po.eu` already resolve to it, and who deploys? | [02](02-server-images.md) |
-| Local `expo run:android` (needs the Android SDK here) or EAS cloud builds (needs an Expo account)? No device is currently attached. | [03](03-app-shell.md) |
+| Question | Blocks | Status |
+|---|---|---|
+| `scanner.yo-po.eu` must resolve to `167.235.146.155` before certbot can issue a certificate — an `A` record at the registrar. | [02](02-server-images.md) | **open** |
+| Local `expo run:android` (needs the Android SDK here) or EAS cloud builds (needs an Expo account)? No device is currently attached. | [03](03-app-shell.md) | **open** |
+| SSH access to the deployment box, and who deploys. | [02](02-server-images.md) | resolved 2026-07-28 — see [deployment-target.md](../deployment-target.md) |

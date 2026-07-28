@@ -49,6 +49,7 @@ not to parsing.
 | [`docs/phases/README.md`](docs/phases/README.md) | Phase index, dependency graph, requirement coverage matrix. |
 | [`docs/phases/NN-*.md`](docs/phases/) | One document per phase: scope, deliverables, acceptance criteria. |
 | [`docs/decisions.md`](docs/decisions.md) | Architecture decision records — every judgement call the spec left open. |
+| [`docs/deployment-target.md`](docs/deployment-target.md) | The server this runs on, and what its constraints mean for the numbers. |
 
 ## Known limitations
 
@@ -65,6 +66,10 @@ how the benchmark numbers should be read.
 - **Gallery imports have no controlled capture conditions.** Their results are valid for comparing OCR
   accuracy and meaningless for comparing capture latency. The History and Library screens filter on
   this so the two never land in the same average silently.
+- **The server runs on two cores shared with a live application.** Absolute latencies are therefore not
+  portable to other hardware. What stays valid is the comparison between the four methods, since all four
+  are measured under the same conditions — and local contention slightly flatters the cloud engines
+  against the self-hosted one. See [`docs/deployment-target.md`](docs/deployment-target.md).
 
 ## Security
 

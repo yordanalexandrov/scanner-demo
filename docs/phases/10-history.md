@@ -52,7 +52,8 @@ README.md                                # + how to read the numbers, and the ca
 [ADR-2](../decisions.md#adr-2--the-on-device-path-runs-against-both-image-variants) ·
 [ADR-7](../decisions.md#adr-7--expired-dates-are-flagged-not-discarded) ·
 [ADR-10](../decisions.md#adr-10--latency-segments-clocks-and-what-may-be-subtracted) ·
-[ADR-11](../decisions.md#adr-11--cost-estimates-come-from-a-versioned-price-table)
+[ADR-11](../decisions.md#adr-11--cost-estimates-come-from-a-versioned-price-table) ·
+[ADR-18](../decisions.md#adr-18--the-benchmark-shares-the-box-with-production)
 
 ## Interfaces
 
@@ -98,7 +99,10 @@ from the rows; the rows cannot be recovered from a summary.
 9. Barcode scans appear in the export's own array and are absent from `attempts`.
 10. The README's "how to read these numbers" section states the caveats that actually apply: GCV and VLM
     `engineMs` include network, gallery imports have no capture latency, medians below ~5 runs are not
-    distributions, and cold-start figures are reported separately.
+    distributions, cold-start figures are reported separately, and **the server figures come from a
+    two-core box shared with a live application** — which slightly flatters the cloud engines relative to
+    the self-hosted one.
+    — [ADR-18](../decisions.md#adr-18--the-benchmark-shares-the-box-with-production)
 
 ## Risks / unknowns
 

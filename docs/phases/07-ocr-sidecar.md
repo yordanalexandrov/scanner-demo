@@ -22,55 +22,63 @@ during stage A.
    server. — *spec § Stack — Server*
 2. **Which input modes does it accept** — a filesystem path, an HTTP upload, or both?
 3. **Does it read from the shared volume**, given a path, with the file written by the TS server's UID?
-4. **What does one image cost in milliseconds on this box**, CPU-only? Report cold start (first inference,
-   models loading) separately from steady state.
-5. **What does its response contain** — per-block boxes and confidences, or only flat text? This decides
-   whether disambiguation rule 1 can ever fire on this engine.
+4. **What does one image cost in milliseconds on this box**, CPU-only, on two cores shared with a live
+   application? Report cold start (first inference, models loading) separately from steady state, and
+   record what else was running at the time.
+   — [ADR-18](../decisions.md#adr-18--the-benchmark-shares-the-box-with-production)
+5. **What is its resident memory** with the models loaded? The budget is roughly 1 GB; the survey in
+   [deployment-target.md](../deployment-target.md) explains why. If the stock configuration does not fit,
+   that is a finding worth reporting before anything is built on top of it.
+6. **What does its response contain** — per-block boxes and confidences, or only flat text? This decides
+   whether the `anchor-proximity` rule can ever fire on this engine.
    — [ADR-4](../decisions.md#adr-4--bbox-is-nullable-and-the-parser-records-which-rule-decided)
-6. **Can the recognition model and character dictionary be replaced** through environment variables or a
+7. **Can the recognition model and character dictionary be replaced** through environment variables or a
    mounted path, without opening the container or writing Python inside it? This determines whether the
    self-hosted engine can ever match Bulgarian anchor words.
    — [ADR-12](../decisions.md#adr-12--the-self-hosted-engine-defaults-to-chineseenglish-models)
-7. **Which thread/concurrency environment variables does it expose**, so CPU use can be bounded?
-8. Whether mobile/lightweight PP-OCR detection and recognition models can be selected over the server
+8. **Which thread/concurrency environment variables does it expose**, so CPU use can be bounded?
+9. Whether mobile/lightweight PP-OCR detection and recognition models can be selected over the server
    ones. — *spec § Gotchas*
 
 **Stop here. Report, then continue.**
 
 ## Scope — stage B: build-out
 
-9. Compose service for the sidecar, **pinned by digest**, never `:latest`. — *spec § Stack — Server*
-10. **Internal-only Docker network with no published ports.** The container is never reachable from
+10. Compose service for the sidecar, **pinned by digest**, never `:latest`. — *spec § Stack — Server*
+11. **Internal-only Docker network with no published ports.** The container is never reachable from
     outside. — *spec § Stack — Server*
-11. The image directory is mounted into the sidecar **read-only**, sharing the named volume created in
+12. The image directory is mounted into the sidecar **read-only**, sharing the named volume created in
     phase 02. Where the container accepts a path, pass a path; where it only accepts an upload, upload —
     but the shared volume exists either way, because it removes a pointless read-and-re-encode cycle when
     it can be used. — *spec § Stack — Server*
-12. **The control channel stays HTTP.** Filesystem sharing replaces the image payload, not the RPC. No
+13. **The control channel stays HTTP.** Filesystem sharing replaces the image payload, not the RPC. No
     file-drop-and-poll pattern: polling adds latency, hides errors and races on partial writes. A normal
     request/response call with an **explicit timeout**. — *spec § Stack — Server*
-13. UIDs aligned or the volume made group-readable, so the sidecar can actually read what the TS server
+14. UIDs aligned or the volume made group-readable, so the sidecar can actually read what the TS server
     wrote. — *spec § Stack — Server*
-14. CPU and thread use constrained explicitly: `cpus:` in Compose plus whatever thread variable the image
-    exposes. Unbounded threading on a small shared VPS makes latency measurements noisy and
-    non-reproducible. — *spec § Gotchas*
-15. **Warm-up at startup** with a dummy image, so the first real request is not a model load. The
+15. CPU and thread use constrained explicitly: `cpus:` in Compose plus whatever thread variable the image
+    exposes, **and a hard `mem_limit`**. The box has two cores, ~2.2 GB free and no swap, shared with a
+    production Postgres — an unbounded container here is a production outage, not a slow benchmark.
+    Unbounded threading also makes the measurements noisy and non-reproducible, which is the reason the
+    specification gives. — *spec § Gotchas*,
+    [ADR-18](../decisions.md#adr-18--the-benchmark-shares-the-box-with-production)
+16. **Warm-up at startup** with a dummy image, so the first real request is not a model load. The
     cold-start figure is reported separately in the README and `engineMs` reflects steady state.
     — *spec § Gotchas*
-16. Engine adapter in the TS server behind a clean interface, producing a standard `OcrResponse` with
+17. Engine adapter in the TS server behind a clean interface, producing a standard `OcrResponse` with
     `engine: "onnx-paddleocr"` (or `onnx-paddleocr-cyrillic`), `engineMsScope: "inference"`,
     `costEstimateUsd: 0`.
-17. `POST /api/v1/ocr/local` — `{ imageId }` → `OcrResponse`. The path is constructed from the image ID by
+18. `POST /api/v1/ocr/local` — `{ imageId }` → `OcrResponse`. The path is constructed from the image ID by
     the server; a client-supplied path never reaches a filesystem read.
     — *spec § Stack — Server*
-18. **The sidecar boundary is measured separately:** `engineMs` is time inside the container as it reports
+19. **The sidecar boundary is measured separately:** `engineMs` is time inside the container as it reports
     it; `serverTotalMs` is wall time inside the Fastify handler. The difference is the process boundary.
     — *spec § Gotchas*, [ADR-10](../decisions.md#adr-10--latency-segments-clocks-and-what-may-be-subtracted)
-19. **Mobile/lightweight PP-OCR detection and recognition models are selected explicitly**, not left to
+20. **Mobile/lightweight PP-OCR detection and recognition models are selected explicitly**, not left to
     the image's default, wherever the spike showed the choice is available. On printed dates the accuracy
     difference is small and the latency difference is large. The selected model names go in the README.
     — *spec § Gotchas*
-20. The "Self-hosted" method button in the app is enabled and wired to this endpoint.
+21. The "Self-hosted" method button in the app is enabled and wired to this endpoint.
 
 ## Out of scope
 
@@ -100,7 +108,8 @@ README.md                           # + cold-start figure, model choice and its 
 [ADR-4](../decisions.md#adr-4--bbox-is-nullable-and-the-parser-records-which-rule-decided) ·
 [ADR-10](../decisions.md#adr-10--latency-segments-clocks-and-what-may-be-subtracted) ·
 [ADR-11](../decisions.md#adr-11--cost-estimates-come-from-a-versioned-price-table) ·
-[ADR-12](../decisions.md#adr-12--the-self-hosted-engine-defaults-to-chineseenglish-models)
+[ADR-12](../decisions.md#adr-12--the-self-hosted-engine-defaults-to-chineseenglish-models) ·
+[ADR-18](../decisions.md#adr-18--the-benchmark-shares-the-box-with-production)
 
 ## Interfaces
 
@@ -120,9 +129,10 @@ POST /api/v1/ocr/local   { imageId } → OcrResponse
 
 ### Stage A
 
-1. `docs/spikes/07-ocr-sidecar.md` exists and answers all eight questions above with observed evidence —
+1. `docs/spikes/07-ocr-sidecar.md` exists and answers all nine questions above with observed evidence —
    commands run and their output — not with expectations.
-2. The report states the image digest, the chosen input mode, and the measured cold and warm timings.
+2. The report states the image digest, the chosen input mode, the measured cold and warm timings, and the
+   sidecar's resident memory with models loaded.
 3. It states plainly whether Cyrillic recognition is reachable through configuration alone.
 
 ### Stage B
@@ -149,7 +159,8 @@ POST /api/v1/ocr/local   { imageId } → OcrResponse
     the run count, go in the README.
 14. The selected detection and recognition model names appear in the README, and they are the
     mobile/lightweight variants wherever the spike found that choice available.
-15. CPU is bounded: under load, `docker stats` shows the sidecar at or below its `cpus:` limit.
+15. CPU **and memory** are bounded: under load, `docker stats` shows the sidecar at or below its `cpus:`
+    limit and well inside its `mem_limit`, and the production Supabase containers stay healthy throughout.
 16. The "Self-hosted" button in the app is enabled and produces a recorded attempt.
 17. Run against images already in the Library from phases 05–06 — no packaging is re-shot for this phase.
 
@@ -161,6 +172,14 @@ POST /api/v1/ocr/local   { imageId } → OcrResponse
 - The image may report no per-block confidence, in which case ADR-5's `null` applies here too.
 - Container clock and the TS server's clock are different processes but the same machine; `engineMs` as
   reported by the container is trusted as a duration, not correlated with server timestamps.
+- **The measurements are taken on a busy machine.** Two cores are shared with a live Supabase stack and
+  two production sites, so `engineMs` will vary with load this project does not control. That is why the
+  acceptance criteria demand a distribution and a spread threshold rather than a number, and why the
+  README must state the conditions next to the figures.
+  — [ADR-18](../decisions.md#adr-18--the-benchmark-shares-the-box-with-production)
+- ~1 GB of memory for models and runtime is the working budget. If the stock image does not fit, options
+  are the lightweight models, a smaller batch or input size — or reporting that this box cannot host the
+  engine, which is itself a legitimate benchmark result.
 
 ## Review checkpoint
 

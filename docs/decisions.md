@@ -32,6 +32,8 @@ had to resolve to be executable. One record per decision.
 | [14](#adr-14--shared-package-build-and-thumbnail-authentication) | Shared package build; thumbnail auth | Proposed | 01, 06 |
 | [15](#adr-15--the-app-is-the-sole-author-of-attempt-rows) | The app is the sole author of attempt rows | **Deviation** | 05–10 |
 | [16](#adr-16--separators-and-year-widths-are-normalised-before-matching) | Separators and year widths normalised before matching | Proposed | 05 |
+| [17](#adr-17--nginx-and-certbot-instead-of-caddy) | nginx + certbot instead of Caddy | **Deviation** | 02 |
+| [18](#adr-18--the-benchmark-shares-the-box-with-production) | The benchmark shares the box with production | Accepted | 02, 07, 10 |
 
 **Rule names, not rule numbers.** The specification numbers its disambiguation rules 1–4;
 [ADR-6](#adr-6--parser-rule-order-and-referencedate) inserts extraction as a step and renumbers them. To
@@ -584,3 +586,73 @@ rather than silent. The parser's tests cover the cross-product deliberately — 
 must both parse to the same date.
 
 **Status.** Proposed.
+
+---
+
+## ADR-17 — nginx and certbot instead of Caddy
+
+**Context.** The specification chose Caddy in front for automatic TLS on `scanner.yo-po.eu`. Surveying the
+target box on 2026-07-28 showed that choice is not available: nginx 1.24 already owns ports 80 and 443,
+serving two production sites (`emerald`, `garden`) with Let's Encrypt certificates managed by `certbot`,
+in front of an eight-container Supabase stack. See [deployment-target.md](deployment-target.md).
+
+**Decision. This departs from the written specification.** TLS for `scanner.yo-po.eu` is terminated by a
+new nginx virtual host with a certbot certificate, proxying to the scanner server on `127.0.0.1:3002`.
+Caddy is dropped from the stack entirely — there is no Caddy container and no `Caddyfile`.
+
+The vhost follows the pattern already in use on the box, with one addition: `client_max_body_size` is
+raised on the upload route, because the existing sites cap it at 8 MB and a full-resolution phone photo
+exceeds that.
+
+**Rationale.** The three options were: add an nginx vhost; run Caddy behind nginx on a local port; or
+migrate the two production sites to Caddy and retire nginx. The second keeps Caddy's name in the stack
+while removing everything Caddy is for — it would terminate no TLS, obtain no certificate, and cost a
+container's memory on a box with 2.2 GB free. The third risks two live sites and a production Supabase
+stack for a proof-of-concept's convenience. The first is the only one that changes nothing that currently
+works.
+
+The specification's decision was made without visibility of the box. It is a departure from the letter of
+a settled choice, not from its purpose: `scanner.yo-po.eu` still gets automatic, renewing TLS.
+
+**Consequences.** Phase 02 delivers an nginx vhost file and a certbot invocation instead of a `Caddyfile`,
+and the Compose stack publishes only to loopback. Certificate renewal rides on the box's existing certbot
+timer rather than being self-contained in the project's stack — meaning this project's TLS now depends on
+host configuration outside the repository, which the phase 02 documentation must state. If the harness
+ever moves to a dedicated box, Caddy becomes available again and this ADR should be revisited.
+
+**Status.** Deviation — accepted by the repository owner on 2026-07-28.
+
+---
+
+## ADR-18 — The benchmark shares the box with production
+
+**Context.** The specification anticipated a small shared VPS and required the sidecar's CPU and threads
+to be bounded for that reason. The survey showed the sharing is heavier than that phrasing suggests:
+**2 cores and 3.7 GB RAM total, ~2.2 GB available, no swap**, alongside a live Postgres and two production
+sites. The harness exists to produce latency numbers that can be trusted, and it will produce them on a
+machine whose load it does not control.
+
+**Decision.** The co-tenancy is treated as a measurement condition, recorded rather than wished away:
+
+- The OCR sidecar gets **both** a CPU cap (`cpus:`) and a hard **`mem_limit`**. With no swap, an
+  unbounded container that grows would trigger the OOM killer, and the largest resident process on the
+  box is production Postgres. A benchmark must not be able to take down the thing it is a guest of.
+- **Lightweight PP-OCR models are a constraint, not a preference.** The specification prefers them for
+  latency; here the memory budget makes the server-sized models impractical anyway.
+- Latency figures are gathered as **distributions over at least twenty runs**, never single measurements,
+  and the phase 07 acceptance criteria set an explicit spread threshold. A single number from this box
+  means nothing.
+- The README states, next to the figures, that they come from a two-core box shared with a live
+  application. A reader comparing them against a dedicated machine's numbers needs to know that.
+
+**Rationale.** The alternative — treating the box as if it were idle — produces numbers that look precise
+and are not, which is the specific failure this project is built to avoid. Naming the condition costs a
+paragraph; discovering it after drawing conclusions costs the conclusions.
+
+**Consequences.** Absolute latencies from this harness are not portable to other hardware. What remains
+valid is the **comparison between the four methods**, since all four are measured under the same
+conditions — and that comparison is what the project is for. Cloud engines (GCV, VLM) are less affected by
+local contention than the sidecar is, which slightly flatters them; that asymmetry belongs in the README's
+"how to read these numbers" section.
+
+**Status.** Accepted — it follows from observed facts, not from a preference.
