@@ -10,6 +10,7 @@
 
 export * from './schemas/ocr.js';
 export * from './schemas/image.js';
+export * from './schemas/api.js';
 export * from './schemas/attempt.js';
 export * from './schemas/barcode.js';
 export * from './schemas/parse.js';

@@ -1,0 +1,57 @@
+# The benchmark stack. It shares a two-core box with two production sites and a live Supabase
+# stack, and every limit below exists because of that - ADR-18, docs/deployment-target.md.
+
+name: scanner-demo
+
+services:
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    image: scanner-demo-server:local
+    restart: unless-stopped
+
+    # Provider credentials and the bearer token come from the file, never from this manifest -
+    # docker-compose.yml is committed and the repository is public.
+    env_file:
+      - server/.env
+
+    environment:
+      # Inside the container only. The loopback binding that matters is the one under `ports`.
+      HOST: 0.0.0.0
+      PORT: 3002
+      # Each directory is its own named volume; phase 07 mounts the image one read-only into the
+      # OCR sidecar, which is only possible if it is a volume in its own right.
+      IMAGE_DIR: /data/images
+      THUMB_DIR: /data/thumbs
+      DATABASE_PATH: /data/db/scanner.sqlite
+
+    ports:
+      # Loopback only. Ports 80 and 443 belong to the box's production nginx, which terminates TLS
+      # for scanner.yo-po.eu and proxies here - ADR-17. Publishing on 0.0.0.0 would expose an
+      # unencrypted API to the internet.
+      - '127.0.0.1:3002:3002'
+
+    volumes:
+      - scanner-images:/data/images
+      - scanner-thumbs:/data/thumbs
+      - scanner-db:/data/db
+
+    # Both limits, not just the CPU one. The box has no swap and the largest resident process on it
+    # is production Postgres; an unbounded container that grows takes down the thing this benchmark
+    # is a guest of, rather than merely itself - ADR-18.
+    cpus: 1.5
+    mem_limit: 512m
+    mem_reservation: 128m
+
+    # 20 GB free on the box, and an unrotated container log is a slow way to consume all of it.
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+volumes:
+  scanner-images:
+  scanner-thumbs:
+  scanner-db:
