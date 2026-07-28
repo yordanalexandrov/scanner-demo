@@ -1,0 +1,10 @@
+node_modules
+dist
+build
+pnpm-lock.yaml
+.husky/_
+
+# Markdown is hand-wrapped here. The specification, the ADRs and the phase documents are prose with
+# deliberate line breaks and hand-aligned tables; reflowing them produces large diffs that hide the
+# one line that actually changed.
+**/*.md

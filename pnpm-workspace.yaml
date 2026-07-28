@@ -1,0 +1,10 @@
+packages:
+  - 'app'
+  - 'server'
+  - 'packages/*'
+
+# pnpm 10 blocks lifecycle scripts unless a dependency is named here. esbuild's postinstall places
+# its native binary, so tsup cannot build without it. Every addition is a deliberate decision to run
+# a third party's install script.
+onlyBuiltDependencies:
+  - esbuild

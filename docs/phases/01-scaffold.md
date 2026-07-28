@@ -1,6 +1,6 @@
 # Phase 01 — Scaffold and shared contracts
 
-**Status:** not started · **Depends on:** — · **Source:** spec milestone 1
+**Status:** complete · **Depends on:** — · **Source:** spec milestone 1
 
 ## Goal
 

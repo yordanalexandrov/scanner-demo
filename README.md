@@ -20,8 +20,10 @@ comparability wins.
 
 ## Status
 
-**Nothing is implemented yet.** This repository currently contains the specification and the phase plan.
-See [`docs/phases/README.md`](docs/phases/README.md) for the build order and where the work stands.
+**Phase 01 of 10 is complete: the scaffold and the shared data contracts.** The workspace builds, lints,
+typechecks and tests, and every record the harness stores is defined once in `packages/shared`. There is
+no runtime code yet — no server, no app, no parser. See [`docs/phases/README.md`](docs/phases/README.md)
+for the build order and where the work stands.
 
 ## Layout
 
@@ -41,6 +43,36 @@ the date parser exist **once** and are imported by both sides, so on-device and 
 by literally the same code. Any accuracy difference between methods is therefore attributable to the OCR,
 not to parsing.
 
+## Development
+
+Node 22 (see [`.nvmrc`](.nvmrc)) and pnpm, pinned by `packageManager` in the root `package.json`.
+
+```bash
+pnpm install
+pnpm -r build       # packages/shared → ESM + CJS + .d.ts
+pnpm -r lint
+pnpm -r typecheck
+pnpm -r test
+```
+
+`pnpm -r build` runs before typechecking `app/` or `server/`: both resolve the shared package through its
+`dist` output, so it has to exist first. CI orders the steps the same way.
+
+Copy `app/.env.example` → `app/.env` and `server/.env.example` → `server/.env` and fill them in. Both
+`.env` files are gitignored.
+
+The pre-commit hook scans staged changes with [gitleaks](https://github.com/gitleaks/gitleaks) and
+**fails if gitleaks is not installed**, rather than passing quietly — a scanner that silently does nothing
+is worse than no scanner. Version 8.19 or newer is required; it introduced `gitleaks git`, which replaced
+`gitleaks protect`:
+
+```bash
+curl -sL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz \
+  | tar -xz -C /tmp gitleaks && install -m 0755 /tmp/gitleaks ~/.local/bin/gitleaks
+```
+
+Coding agents: start with [`AGENTS.md`](AGENTS.md).
+
 ## Documentation
 
 | Document | What it is |
@@ -50,6 +82,7 @@ not to parsing.
 | [`docs/phases/NN-*.md`](docs/phases/) | One document per phase: scope, deliverables, acceptance criteria. |
 | [`docs/decisions.md`](docs/decisions.md) | Architecture decision records — every judgement call the spec left open. |
 | [`docs/deployment-target.md`](docs/deployment-target.md) | The server this runs on, and what its constraints mean for the numbers. |
+| [`AGENTS.md`](AGENTS.md) | Working instructions for coding agents. `CLAUDE.md` is a symlink to it. |
 
 ## Known limitations
 

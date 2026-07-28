@@ -1,0 +1,19 @@
+{
+  "name": "@scanner-demo/server",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Fastify image store, OCR engines and benchmark records. Implemented from phase 02.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint --config ../eslint.config.js . --no-error-on-unmatched-pattern"
+  },
+  "dependencies": {
+    "@scanner-demo/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.2",
+    "typescript": "^5.9.3"
+  }
+}
