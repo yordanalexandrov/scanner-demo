@@ -8,3 +8,7 @@ packages:
 # a third party's install script.
 onlyBuiltDependencies:
   - esbuild
+  # Native modules. better-sqlite3 compiles or downloads a prebuilt .node binding, sharp places the
+  # libvips binary for the platform. Neither works if its install script is blocked.
+  - better-sqlite3
+  - sharp

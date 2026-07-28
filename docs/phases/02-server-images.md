@@ -1,6 +1,10 @@
 # Phase 02 — Server: image store, health, deployment
 
-**Status:** not started · **Depends on:** 01 · **Source:** spec milestone 2
+**Status:** complete · **Depends on:** 01 · **Source:** spec milestone 2
+
+Deployed and verified on 2026-07-28. `https://scanner.yo-po.eu` is live behind the nginx vhost with a
+Let's Encrypt certificate valid to 2026-10-26, on the certbot timer alongside `emerald` and `garden`.
+Deployment steps and rollback: [../../deploy/README.md](../../deploy/README.md).
 
 ## Goal
 
@@ -151,17 +155,24 @@ Environment (`server/.env.example`): `PORT`, `API_TOKEN`, `IMAGE_DIR`, `DB_PATH`
 
 ## Risks / unknowns
 
-- **Blocker: `scanner.yo-po.eu` does not resolve.** It needs an `A` record pointing at `167.235.146.155`,
-  set at the DNS registrar by the owner. certbot cannot issue a certificate until then, so acceptance
-  criterion 1 cannot be met. Everything else in this phase can be built and verified over
-  `127.0.0.1:3002` in the meantime.
+- ~~**Blocker: `scanner.yo-po.eu` does not resolve.**~~ **Cleared 2026-07-28.** `dig +short
+  scanner.yo-po.eu A` returns `167.235.146.155`, so certbot can issue and acceptance criterion 1 is
+  reachable.
 - SSH access is confirmed: `yordan@hez.yo-po.eu`, with `docker` group membership and passwordless sudo.
   That also means a careless command here reaches production, so every nginx change is `nginx -t`-checked
   before reload and the garden stack is verified healthy afterwards.
-- `better-sqlite3` is a native module: the Docker build needs build tooling present, or a prebuilt binary
-  matching `node:22-slim`. Check this early — it is the usual cause of a broken first image build.
-- File ownership in the volume matters later: phase 07 mounts it read-only into the sidecar, so the UID
-  the server writes as must be readable there. Decide the UID here rather than discovering it in phase 07.
+- ~~`better-sqlite3` is a native module: the Docker build needs build tooling present, or a prebuilt binary
+  matching `node:22-slim`.~~ **Confirmed, and it did break the first image build.** `better-sqlite3`
+  **13.0.1 publishes no prebuilds at all**; 12.x publishes `node-v127-linux-x64`, which is exactly Node
+  22's ABI. Pinned to 12.x rather than adding python3 and a C++ toolchain to the image, because
+  compiling SQLite from source on a two-core box with no swap and a live Postgres is the wrong trade —
+  [ADR-18](../decisions.md#adr-18--the-benchmark-shares-the-box-with-production). Recorded in
+  `deploy/README.md` under _Known build constraints_.
+- ~~File ownership in the volume matters later: phase 07 mounts it read-only into the sidecar, so the UID
+  the server writes as must be readable there. Decide the UID here rather than discovering it in phase 07.~~
+  **Decided: UID 1000 (`node`), files written `0644`.** The Dockerfile creates `/data/*` owned by `node`
+  before the volumes are mounted, so Docker seeds each empty named volume with that ownership. Recorded
+  in `deploy/README.md`.
 - Only ~20 GB of disk is free and Docker images already account for 6.8 GB of it. Two-variant storage
   ([ADR-3](../decisions.md#adr-3--images-are-stored-in-two-variants-linked-by-capturegroupid)) roughly
   doubles per-capture size; a few hundred images is comfortable, a few thousand is not.

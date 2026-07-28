@@ -49,6 +49,7 @@ Ports **3002 and 3003 are free**; the scanner server takes 3002, bound to loopba
 
 ## Outstanding
 
-- **`scanner.yo-po.eu` does not resolve.** It needs an `A` record pointing at `167.235.146.155` before
-  certbot can issue a certificate. This is a change at the DNS registrar and is the one remaining blocker
-  on phase 02.
+Nothing. The one blocker recorded here has cleared:
+
+- ~~**`scanner.yo-po.eu` does not resolve.**~~ Resolved. Re-checked on **2026-07-28** during phase 02:
+  `dig +short scanner.yo-po.eu A` returns `167.235.146.155`. certbot can now issue a certificate.

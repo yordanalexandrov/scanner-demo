@@ -4,7 +4,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  // No sources yet - the Fastify server arrives in phase 02. `files: []` keeps `tsc` quiet about it
-  // without loosening anything; `include` is added alongside the first source file.
-  "files": []
+  "include": ["src/**/*.ts", "drizzle.config.ts", "vitest.config.ts"]
 }

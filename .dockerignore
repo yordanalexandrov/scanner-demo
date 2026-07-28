@@ -1,0 +1,35 @@
+# The build context is the repository root, because the server depends on packages/shared through
+# the workspace. Without this file that context includes node_modules and the whole git history,
+# which on a box with 20 GB free is not a trivial cost.
+
+.git
+.github
+.husky
+.idea
+.vscode
+
+**/node_modules
+**/dist
+**/build
+**/.expo
+**/*.tsbuildinfo
+
+app/android
+app/ios
+**/*.apk
+**/*.aab
+
+# Runtime state. The container's data lives in named volumes, never in the image.
+server/data
+**/*.sqlite
+**/*.sqlite-journal
+
+# Never let a credential into a build layer.
+**/.env
+**/.env.*
+!**/.env.example
+server/secrets
+
+docs
+*.md
+!README.md

@@ -5,15 +5,38 @@
   "description": "Fastify image store, OCR engines and benchmark records. Implemented from phase 02.",
   "license": "MIT",
   "type": "module",
+  "//files": "What `pnpm deploy` copies into the runtime image: the compiled output and the migrations it applies at boot. Sources, tsconfigs and the Dockerfile have no business being in a running container.",
+  "files": [
+    "dist",
+    "drizzle"
+  ],
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint --config ../eslint.config.js . --no-error-on-unmatched-pattern"
+    "lint": "eslint --config ../eslint.config.js . --no-error-on-unmatched-pattern",
+    "test": "vitest run",
+    "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
-    "@scanner-demo/shared": "workspace:*"
+    "@fastify/multipart": "^10.1.0",
+    "@scanner-demo/shared": "workspace:*",
+    "better-sqlite3": "^12.11.1",
+    "dotenv": "^17.4.2",
+    "drizzle-orm": "^0.45.2",
+    "fastify": "^5.10.0",
+    "fastify-plugin": "^6.0.0",
+    "fastify-type-provider-zod": "^7.0.0",
+    "sharp": "^0.35.3",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.19.2",
-    "typescript": "^5.9.3"
+    "drizzle-kit": "^0.31.10",
+    "tsx": "^4.23.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
   }
 }

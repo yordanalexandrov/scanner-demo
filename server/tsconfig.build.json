@@ -1,0 +1,15 @@
+{
+  // The emitting configuration. `tsconfig.json` typechecks everything including tests and config
+  // files; this one compiles only what ships. dist/ mirrors src/, so the relative paths in
+  // version.ts and db/client.ts hold in both layouts.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "declaration": false,
+    "declarationMap": false
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"]
+}
