@@ -1,0 +1,17 @@
+{
+  "name": "@scanner-demo/app",
+  "version": "0.0.0",
+  "private": true,
+  "description": "React Native (Expo dev build, Android only). Implemented from phase 03.",
+  "license": "MIT",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint --config ../eslint.config.js . --no-error-on-unmatched-pattern"
+  },
+  "dependencies": {
+    "@scanner-demo/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

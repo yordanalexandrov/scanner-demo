@@ -58,7 +58,7 @@ each one. Phase 07 precedes 08 and 09 because it introduces the `OcrEngine` inte
 
 | # | Phase | Status | Stop for review |
 |---|---|---|---|
-| [01](01-scaffold.md) | Scaffold and shared contracts | not started | Schemas, CI, secret hook |
+| [01](01-scaffold.md) | Scaffold and shared contracts | complete | Schemas, CI, secret hook |
 | [02](02-server-images.md) | Server: image store, health, deployment | not started | Upload/serve/thumb over TLS |
 | [03](03-app-shell.md) | App shell: dev build, navigation, Home | not started | Dev build on device, health indicator |
 | [04](04-barcode.md) | Barcode scan screen | not started | Live decode + recorded latency |

@@ -1,0 +1,11 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM"]
+  },
+  // No sources yet - the Expo app arrives in phase 03, which also replaces this with Expo's own
+  // base config and adds `include`. Strict mode still comes from tsconfig.base.json, never from here.
+  "files": []
+}

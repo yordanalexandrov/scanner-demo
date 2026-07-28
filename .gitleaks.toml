@@ -1,0 +1,33 @@
+title = "scanner-demo"
+
+# The repository is public and the app is shipped as an APK, so a leaked key is leaked to everyone.
+# This config is used identically by the pre-commit hook and by CI, so a commit that passes locally
+# passes in CI for the same reasons.
+
+[extend]
+useDefault = true
+
+# The default rule set only recognises the classic OpenAI key shape (`sk-` followed by 48 base62
+# characters with `T3BlbkFJ` in the middle). Keys issued today are `sk-proj-`, `sk-svcacct-` or
+# `sk-admin-` followed by a much longer base64url string, and they pass the default rules untouched.
+# Verified against gitleaks 8.30.1: without this rule an `sk-proj-` key commits cleanly.
+#
+# The VLM key is the one credential in this project with a real bill attached, so it gets an explicit
+# rule rather than a hope that a generic entropy check notices it.
+[[rules]]
+id = "openai-api-key-prefixed"
+description = "OpenAI API key (project, service-account or admin form)"
+regex = '''\bsk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{20,}'''
+keywords = ["sk-proj-", "sk-svcacct-", "sk-admin-"]
+
+[[allowlists]]
+description = """
+.env.example files list every variable the project reads, with comments and empty values. They are
+the documentation of the configuration surface and contain no credentials by construction. Values
+are never added to them - a filled-in value belongs in .env, which is gitignored.
+"""
+paths = ['''(^|/)\.env\.example$''']
+
+[[allowlists]]
+description = "Lockfile integrity hashes look like high-entropy strings and are not secrets."
+paths = ['''(^|/)pnpm-lock\.yaml$''']

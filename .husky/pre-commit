@@ -1,0 +1,21 @@
+#!/usr/bin/env sh
+# Fail the commit if anything resembling a credential is staged.
+#
+# This is a hard gate, not a warning: the repository is public and a key that reaches the remote is
+# already compromised. If gitleaks is missing the hook fails rather than passing quietly, because a
+# scanner that silently does nothing is worse than no scanner at all.
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "pre-commit: gitleaks is not installed, so staged changes cannot be scanned for secrets."
+  echo ""
+  echo "  Install a release from https://github.com/gitleaks/gitleaks/releases, for example:"
+  echo "    curl -sL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz \\"
+  echo "      | tar -xz -C /tmp gitleaks && install -m 0755 /tmp/gitleaks ~/.local/bin/gitleaks"
+  echo ""
+  echo "  Version 8.19 or newer is required: it is the release that introduced 'gitleaks git',"
+  echo "  which replaced the older 'gitleaks protect'."
+  exit 1
+fi
+
+# --redact keeps the finding out of the terminal scrollback and any CI log that mirrors it.
+gitleaks git --staged --redact --verbose
