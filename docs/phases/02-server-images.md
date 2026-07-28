@@ -1,6 +1,10 @@
 # Phase 02 — Server: image store, health, deployment
 
-**Status:** not started · **Depends on:** 01 · **Source:** spec milestone 2
+**Status:** complete · **Depends on:** 01 · **Source:** spec milestone 2
+
+Deployed and verified on 2026-07-28. `https://scanner.yo-po.eu` is live behind the nginx vhost with a
+Let's Encrypt certificate valid to 2026-10-26, on the certbot timer alongside `emerald` and `garden`.
+Deployment steps and rollback: [../../deploy/README.md](../../deploy/README.md).
 
 ## Goal
 
