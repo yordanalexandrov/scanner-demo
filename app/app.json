@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "scanner-demo",
+    "slug": "scanner-demo",
+    "version": "0.0.0",
+    "scheme": "scannerdemo",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "icon": "./assets/icon.png",
+    "platforms": ["android"],
+    "android": {
+      "package": "eu.yopo.scannerdemo",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "plugins": [
+      "expo-dev-client",
+      [
+        "react-native-vision-camera",
+        {
+          "cameraPermissionText": "scanner-demo needs the camera to scan barcodes and photograph expiry dates.",
+          "enableFrameProcessors": false,
+          "enableCodeScanner": true
+        }
+      ]
+    ]
+  }
+}

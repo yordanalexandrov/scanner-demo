@@ -20,10 +20,12 @@ comparability wins.
 
 ## Status
 
-**Phase 01 of 10 is complete: the scaffold and the shared data contracts.** The workspace builds, lints,
-typechecks and tests, and every record the harness stores is defined once in `packages/shared`. There is
-no runtime code yet — no server, no app, no parser. See [`docs/phases/README.md`](docs/phases/README.md)
-for the build order and where the work stands.
+**Phases 01 and 02 of 10 are complete; phase 03 is in review.** Every record the harness stores is
+defined once in `packages/shared`. The server is deployed at `scanner.yo-po.eu` and stores, serves and
+thumbnails images. The Android app now builds as an Expo development build, navigates its five screens
+and reports whether the server is reachable. There is no camera code and no OCR yet — those start at
+phase 04. See [`docs/phases/README.md`](docs/phases/README.md) for the build order and where the work
+stands.
 
 ## Layout
 

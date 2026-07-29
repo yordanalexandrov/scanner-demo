@@ -1,11 +1,20 @@
 {
-  "extends": "../tsconfig.base.json",
+  // Two bases, in this order and on purpose. Expo's config supplies the React Native specifics -
+  // the JSX runtime, its module shims, its globals. The repository base comes second so that it
+  // wins: strictness is set once, in tsconfig.base.json, and no package may relax it - phase 01
+  // acceptance criterion 3, which greps package tsconfigs for exactly that key.
+  //
+  // `include` is owned by Expo's CLI, which rewrites this file whenever it disagrees with it and
+  // drops every comment when it does. If these notes vanish again, that is what happened.
+  "extends": ["expo/tsconfig.base", "../tsconfig.base.json"],
   "compilerOptions": {
     "noEmit": true,
     "jsx": "react-jsx",
+    // The repository base narrows `lib` to ES2022. React Native's own typings reach for DOM globals
+    // (fetch, FormData, AbortController), so DOM goes back on here - the app runs them, Hermes
+    // provides them.
     "lib": ["ES2022", "DOM"]
   },
-  // No sources yet - the Expo app arrives in phase 03, which also replaces this with Expo's own
-  // base config and adds `include`. Strict mode still comes from tsconfig.base.json, never from here.
-  "files": []
+  "include": ["index.ts", "src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["node_modules", "android"]
 }
