@@ -34,7 +34,7 @@ had to resolve to be executable. One record per decision.
 | [16](#adr-16--separators-and-year-widths-are-normalised-before-matching) | Separators and year widths normalised before matching | Proposed | 05 |
 | [17](#adr-17--nginx-and-certbot-instead-of-caddy) | nginx + certbot instead of Caddy | **Deviation** | 02 |
 | [18](#adr-18--the-benchmark-shares-the-box-with-production) | The benchmark shares the box with production | Accepted | 02, 07, 10 |
-| [19](#adr-19--vision-camera-is-pinned-to-v4-and-the-android-project-is-generated) | vision-camera pinned to v4; Android project generated, not committed | Proposed | 03, 04, 05 |
+| [19](#adr-19--vision-camera-is-pinned-to-v4-and-the-android-project-is-generated) | vision-camera pinned to v4; Android project generated, not committed | Accepted | 03, 04, 05 |
 
 **Rule names, not rule numbers.** The specification numbers its disambiguation rules 1–4;
 [ADR-6](#adr-6--parser-rule-order-and-referencedate) inserts extraction as a step and renumbers them. To
@@ -713,4 +713,7 @@ defers; the trigger for revisiting is v5 shipping Android object output, and the
 this one. The pin is exact so that a routine `pnpm update` cannot quietly cross the major boundary and
 delete the barcode path.
 
-**Status.** Proposed.
+**Status.** Accepted 2026-07-29. The compatibility risk in the paragraph above was weighed and taken
+knowingly, against the alternatives: a frame processor is forbidden outright, `expo-camera`'s
+`onBarcodeScanned` would abandon the mechanism the specification names, and waiting on v5 would block
+phase 04 on another project's schedule. `expo-camera` remains the fallback if v4 ever stops building.
