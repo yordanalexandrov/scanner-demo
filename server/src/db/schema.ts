@@ -1,4 +1,4 @@
-import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { index, integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 import type { CapturedAtSource, ImageSource, ImageVariant } from '@scanner-demo/shared';
 
 /**
@@ -52,3 +52,41 @@ export const images = sqliteTable(
 
 export type ImageRow = typeof images.$inferSelect;
 export type NewImageRow = typeof images.$inferInsert;
+
+/**
+ * The `barcode_scans` table, mirroring `barcodeScanSchema` in `packages/shared` field for field.
+ *
+ * Its own table rather than a row type inside `attempts` - ADR-1. A barcode scan has no image, no
+ * engine, no raw text, no parsed date and no cost, so folding it in would make most of the attempts
+ * columns nullable across the whole benchmark dataset to accommodate a row that shares none of
+ * their semantics.
+ */
+export const barcodeScans = sqliteTable(
+  'barcode_scans',
+  {
+    id: text('id').primaryKey(),
+
+    /** The decoded EAN-13, exactly as the scanner reported it. */
+    value: text('value').notNull(),
+
+    /**
+     * Scanner-ready to callback, in milliseconds, measured entirely on the phone's monotonic clock.
+     * Stored as a real: this is the measurement the phase exists to produce, and rounding it to an
+     * integer at rest would throw away precision the phone actually had - ADR-10.
+     */
+    decodeMs: real('decodeMs').notNull(),
+
+    /** Handset model plus Android version. Decode latency depends on both, so runs stay comparable. */
+    device: text('device').notNull(),
+
+    /** Unix ms, server-assigned. Ordered and paginated on, never subtracted - ADR-10. */
+    scannedAt: integer('scannedAt').notNull(),
+  },
+  (table) => [
+    // The listing's sort order. Keyset pagination reads this index directly instead of sorting.
+    index('barcode_scans_scannedAt_id_idx').on(table.scannedAt, table.id),
+  ],
+);
+
+export type BarcodeScanRow = typeof barcodeScans.$inferSelect;
+export type NewBarcodeScanRow = typeof barcodeScans.$inferInsert;

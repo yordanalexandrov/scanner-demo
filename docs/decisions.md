@@ -57,7 +57,7 @@ numbers answering goal 1 vanish when the screen unmounts.
 barcode_scans
   id          text primary key      -- uuid
   value       text not null         -- the decoded EAN-13
-  decodeMs    real not null         -- screen-ready → callback, performance.now()
+  decodeMs    real not null         -- scanner-ready → callback, performance.now()
   device      text not null         -- model + Android version, so runs stay comparable
   scannedAt   integer not null      -- unix ms, wall clock, for ordering only
 
@@ -73,6 +73,14 @@ semantics, and every attempts query would need a method filter to stay correct.
 **Consequences.** One extra table, two extra endpoints, and a small list view on the barcode screen showing
 recorded scans with the running median. Barcode scans do not appear in History or in the JSON export's
 attempts array; the export gains a sibling `barcodeScans` array.
+
+**Amended by phase 04.** `decodeMs` is measured from *scanner*-ready rather than *screen*-ready: the origin
+is the camera reporting it is running for the first reading of a session, and the previous recorded scan
+for every reading after it. The row deliberately does **not** record which of the two it was, so a reading
+lifted out of the export is not self-describing — it has to be attributed by session first. Only the first
+reading of a session is a decode latency; the rest are bounded below by the screen's 800 ms dedupe window.
+The reasoning, and the measurements that forced it, are in
+[phase 04](phases/04-barcode.md#measured-on-device).
 
 **Status.** Accepted.
 

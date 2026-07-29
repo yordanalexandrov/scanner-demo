@@ -19,4 +19,5 @@ export * from './data/anchors.js';
 export * from './data/months.js';
 
 export * from './timing.js';
+export * from './stats.js';
 export * from './pricing.js';

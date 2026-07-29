@@ -5,7 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import sharp from 'sharp';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { ImageUploadMeta } from '@scanner-demo/shared';
+import type { BarcodeScan, BarcodeScanCreate, ImageUploadMeta } from '@scanner-demo/shared';
 import { buildServer } from './app.js';
 import { openDatabase } from './db/client.js';
 import type { DbHandle } from './db/client.js';
@@ -110,6 +110,31 @@ async function upload(
   };
 }
 
+function scanBody(overrides: Partial<BarcodeScanCreate> = {}): BarcodeScanCreate {
+  return {
+    value: '4006381333931',
+    decodeMs: 412.75,
+    device: 'Pixel Test (Android 15)',
+    ...overrides,
+  };
+}
+
+async function postScan(
+  overrides: Partial<BarcodeScanCreate> = {},
+): Promise<{ statusCode: number; id: string }> {
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/v1/barcode-scans',
+    headers: { authorization: `Bearer ${TOKEN}` },
+    payload: scanBody(overrides),
+  });
+
+  return {
+    statusCode: response.statusCode,
+    id: response.statusCode === 201 ? (response.json() as { id: string }).id : '',
+  };
+}
+
 beforeEach(async () => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'scanner-demo-'));
 
@@ -144,6 +169,8 @@ describe('authentication', () => {
   it.each([
     ['/api/v1/images', 'GET'],
     ['/api/v1/images', 'POST'],
+    ['/api/v1/barcode-scans', 'GET'],
+    ['/api/v1/barcode-scans', 'POST'],
   ])('refuses %s %s without a token', async (url, method) => {
     const response = await app.inject({ method: method as 'GET' | 'POST', url });
 
@@ -467,9 +494,96 @@ describe('listing', () => {
   });
 });
 
+describe('barcode scans', () => {
+  it('records a scan and returns it in the listing - ADR-1', async () => {
+    const created = await postScan({ value: '4006381333931', decodeMs: 412.75 });
+
+    expect(created.statusCode).toBe(201);
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v1/barcode-scans',
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
+
+    const items = (listed.json() as { items: BarcodeScan[] }).items;
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      id: created.id,
+      value: '4006381333931',
+      device: 'Pixel Test (Android 15)',
+    });
+    // Sub-millisecond precision survives the round trip. Rounding the measurement at rest would
+    // throw away precision the phone actually had - ADR-10.
+    expect(items[0]?.decodeMs).toBe(412.75);
+    expect(items[0]?.scannedAt).toBeGreaterThan(0);
+  });
+
+  it('assigns id and scannedAt itself and refuses a client that supplies them', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/barcode-scans',
+      headers: { authorization: `Bearer ${TOKEN}` },
+      payload: { ...scanBody(), id: 'chosen-by-the-phone', scannedAt: 1 },
+    });
+
+    expect(response.statusCode).toBe(400);
+  });
+
+  it('refuses a value that is not thirteen digits', async () => {
+    const response = await postScan({ value: '400638133393' });
+
+    expect(response.statusCode).toBe(400);
+  });
+
+  it('paginates newest first without skipping or repeating a row', async () => {
+    const posted: string[] = [];
+
+    for (let index = 0; index < 5; index += 1) {
+      const { id } = await postScan({ value: String(4_006_381_333_930 + index) });
+      posted.push(id);
+      // A POST with no image work behind it takes well under a millisecond, so without this the
+      // rows would share a `scannedAt` and the order would fall to the UUID tie-break - which is
+      // correct but not the property being asserted here.
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    }
+
+    const seen: string[] = [];
+    let cursor: string | null = null;
+
+    do {
+      const url: string = `/api/v1/barcode-scans?limit=2${cursor === null ? '' : `&cursor=${cursor}`}`;
+      const page = await app.inject({
+        method: 'GET',
+        url,
+        headers: { authorization: `Bearer ${TOKEN}` },
+      });
+
+      const body = page.json() as { items: BarcodeScan[]; nextCursor: string | null };
+      seen.push(...body.items.map((row) => row.id));
+      cursor = body.nextCursor;
+    } while (cursor !== null);
+
+    expect(seen).toHaveLength(5);
+    expect(new Set(seen).size).toBe(5);
+    expect(seen).toEqual([...posted].reverse());
+  });
+
+  it('refuses a malformed cursor rather than silently starting over', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/barcode-scans?cursor=not-a-cursor',
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
+
+    expect(response.statusCode).toBe(400);
+  });
+});
+
 describe('durability', () => {
   it('keeps images and rows across a restart of the server process', async () => {
     const { imageId } = await upload(await testImage(200, 150));
+    const scan = await postScan();
 
     await app.close();
     handle.close();
@@ -484,5 +598,15 @@ describe('durability', () => {
     });
 
     expect(response.statusCode).toBe(200);
+
+    // The barcode numbers outliving the process is the whole reason they are recorded here rather
+    // than in the screen that produced them - ADR-1.
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v1/barcode-scans',
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
+
+    expect((listed.json() as { items: BarcodeScan[] }).items[0]?.id).toBe(scan.id);
   });
 });

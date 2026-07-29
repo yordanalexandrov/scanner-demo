@@ -3,13 +3,13 @@ import { decodeCursor, encodeCursor } from './cursor.js';
 
 describe('cursors', () => {
   it('round-trips', () => {
-    const cursor = { createdAt: 1_770_000_000_000, id: 'a-b-c' };
+    const cursor = { sortKey: 1_770_000_000_000, id: 'a-b-c' };
     expect(decodeCursor(encodeCursor(cursor))).toEqual(cursor);
   });
 
   it('keeps an ID that contains the separator intact', () => {
     // The split is on the first colon only, so an ID may contain one without corrupting the cursor.
-    const cursor = { createdAt: 1, id: 'a:b:c' };
+    const cursor = { sortKey: 1, id: 'a:b:c' };
     expect(decodeCursor(encodeCursor(cursor))).toEqual(cursor);
   });
 

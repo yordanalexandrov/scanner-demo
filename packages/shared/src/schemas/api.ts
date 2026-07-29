@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { barcodeScanSchema } from './barcode.js';
 import { imageRecordSchema, imageSourceSchema, imageVariantSchema } from './image.js';
 
 /**
@@ -68,6 +69,52 @@ export const imageListResponseSchema = z.object({
 });
 
 export type ImageListResponse = z.infer<typeof imageListResponseSchema>;
+
+/**
+ * What the phone knows about a decode, and nothing else.
+ *
+ * `id` and `scannedAt` are absent by design: the server assigns both, exactly as it does for an
+ * upload. `scannedAt` in particular is the field the listing is ordered and paginated on, and a
+ * cursor built on a value the client chose would not survive two phones with skewed clocks.
+ *
+ * Strict, so a field the server would silently drop is a 400 instead. Sending `decodeMs` under a
+ * misspelled key must not look like a successful measurement.
+ */
+export const barcodeScanCreateSchema = z.strictObject(
+  barcodeScanSchema.pick({ value: true, decodeMs: true, device: true }).shape,
+);
+
+export type BarcodeScanCreate = z.infer<typeof barcodeScanCreateSchema>;
+
+export const barcodeScanCreateResponseSchema = z.object({
+  id: z.string(),
+});
+
+export type BarcodeScanCreateResponse = z.infer<typeof barcodeScanCreateResponseSchema>;
+
+export const BARCODE_SCAN_LIST_DEFAULT_LIMIT = 50;
+export const BARCODE_SCAN_LIST_MAX_LIMIT = 100;
+
+/** Newest first, keyset-paginated on `scannedAt` - the same scheme the image listing uses. */
+export const barcodeScanListQuerySchema = z.object({
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(BARCODE_SCAN_LIST_MAX_LIMIT)
+    .default(BARCODE_SCAN_LIST_DEFAULT_LIMIT),
+  cursor: z.string().min(1).optional(),
+});
+
+export type BarcodeScanListQuery = z.infer<typeof barcodeScanListQuerySchema>;
+
+export const barcodeScanListResponseSchema = z.object({
+  items: z.array(barcodeScanSchema),
+  /** `null` on the last page. Opaque to the client - decode it nowhere but the server. */
+  nextCursor: z.string().nullable(),
+});
+
+export type BarcodeScanListResponse = z.infer<typeof barcodeScanListResponseSchema>;
 
 /** The only unauthenticated response in the API. `uptimeMs` is monotonic, not a clock difference. */
 export const healthResponseSchema = z.object({

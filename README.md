@@ -20,12 +20,12 @@ comparability wins.
 
 ## Status
 
-**Phases 01 and 02 of 10 are complete; phase 03 is in review.** Every record the harness stores is
-defined once in `packages/shared`. The server is deployed at `scanner.yo-po.eu` and stores, serves and
-thumbnails images. The Android app now builds as an Expo development build, navigates its five screens
-and reports whether the server is reachable. There is no camera code and no OCR yet — those start at
-phase 04. See [`docs/phases/README.md`](docs/phases/README.md) for the build order and where the work
-stands.
+**Phases 01 to 03 of 10 are complete; phase 04 is in review.** Every record the harness stores is
+defined once in `packages/shared`. The server is deployed at `scanner.yo-po.eu`, stores, serves and
+thumbnails images, and records barcode decode latencies. The Android app builds as an Expo development
+build, navigates its five screens, reports whether the server is reachable, and scans EAN-13 with the
+decode latency measured on the phone's monotonic clock. There is no OCR yet — that starts at phase 05.
+See [`docs/phases/README.md`](docs/phases/README.md) for the build order and where the work stands.
 
 ## Layout
 
@@ -101,6 +101,25 @@ how the benchmark numbers should be read.
 - **Gallery imports have no controlled capture conditions.** Their results are valid for comparing OCR
   accuracy and meaningless for comparing capture latency. The History and Library screens filter on
   this so the two never land in the same average silently.
+- **Only the first barcode decode of a session is a decode latency.** Every later one is measured from
+  the previous decode, which bounds it below by the 800 ms dedupe window and above by how fast a person
+  moves the phone to the next package. In the phase 04 run, 54 such readings had a median of 832.3 ms —
+  that is the dedupe window, not the scanner. The screen flags the first reading of each session; a
+  figure taken from the export has to be attributed by session before it means anything. See
+  [phase 04](docs/phases/04-barcode.md).
+- **Barcode decode latency is not recorded with its ambient conditions.** Lighting, the angle the phone
+  is held at and the handset's thermal state dominate it, and none of the three is captured. `device` is
+  stored on every row so that runs on different handsets are never averaged together, but two runs on the
+  same phone under different lighting are not distinguishable in the data. Quote these figures with the
+  conditions they were taken under.
+- **The barcode scanner produced silent misreads at 5.4% in the one run measured.** Three of 56 scans
+  returned a corrupted version of the barcode in front of the lens, each differing only in the leading
+  digits and each carrying a **valid EAN-13 check digit** — so no validation downstream can reject them.
+  The analysis stream runs at 640×480 rather than the specified 720p, because vision-camera 4.7.3 does
+  not pass the camera format to the code scanner's image analysis; whether that, or focus, or motion blur
+  is the cause is an open question recorded in [phase 04](docs/phases/04-barcode.md). Barcode *values*
+  from this harness should not be treated as reliable identifiers. Goal 1 measures decode speed, which
+  this does not invalidate.
 - **The server runs on two cores shared with a live application.** Absolute latencies are therefore not
   portable to other hardware. What stays valid is the comparison between the four methods, since all four
   are measured under the same conditions — and local contention slightly flatters the cloud engines

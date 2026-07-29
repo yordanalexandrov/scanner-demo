@@ -214,8 +214,8 @@ export function createImageRoutes(options: ImageRoutesOptions): FastifyPluginAsy
           // uploads can share a millisecond.
           conditions.push(
             or(
-              sql`${images.createdAt} < ${decoded.createdAt}`,
-              and(eq(images.createdAt, decoded.createdAt), sql`${images.id} < ${decoded.id}`),
+              sql`${images.createdAt} < ${decoded.sortKey}`,
+              and(eq(images.createdAt, decoded.sortKey), sql`${images.id} < ${decoded.id}`),
             ),
           );
         }
@@ -250,7 +250,7 @@ export function createImageRoutes(options: ImageRoutesOptions): FastifyPluginAsy
           items: page.map(toImageRecord),
           nextCursor:
             rows.length > limit && last !== undefined
-              ? encodeCursor({ createdAt: last.createdAt, id: last.id })
+              ? encodeCursor({ sortKey: last.createdAt, id: last.id })
               : null,
         });
       },
