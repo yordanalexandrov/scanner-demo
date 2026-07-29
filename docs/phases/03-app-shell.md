@@ -134,8 +134,13 @@ Environment (`app/.env.example`): `EXPO_PUBLIC_SERVER_URL`, `EXPO_PUBLIC_API_TOK
   the fallback is `node-linker=hoisted` for the app package — recorded here so it is not rediscovered.
   Note that `disableHierarchicalLookup`, which Expo's monorepo guide sets, must stay **off** under pnpm:
   every transitive dependency resolves through a nested `node_modules/.pnpm` path.
-- **Still unverified at the time of writing:** everything that needs a running app. No Android device is
-  attached, so criteria 1, 2, 3 and 5 wait on one being connected.
+- Verified on device 2026-07-29 — Samsung SM-S928B, Android 16. Criteria 1, 3 and 5 pass, and criterion
+  2 passes for the green half. **The red/green transition is still unverified**: it needs the server
+  stopped, and the server shares its box with production, so that is the owner's call to make rather
+  than something to do in passing.
+- `app/tsconfig.json` is rewritten by Expo's CLI whenever its `include` disagrees, and its writer drops
+  every comment in the file. The comments there were restored once already. If they disappear again,
+  that is the cause, not a careless edit.
 
 ## Review checkpoint
 
