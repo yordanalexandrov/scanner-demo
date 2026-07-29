@@ -1,6 +1,6 @@
 # Phase 04 — Barcode scan screen
 
-**Status:** in review · **Depends on:** 03 · **Source:** spec milestone 4
+**Status:** complete · **Depends on:** 03 · **Source:** spec milestone 4
 
 ## Goal
 

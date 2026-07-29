@@ -1,6 +1,6 @@
 # Phase 03 — App shell: dev build, navigation, Home
 
-**Status:** in review · **Depends on:** 01, 02 · **Source:** spec milestone 3
+**Status:** complete · **Depends on:** 01, 02 · **Source:** spec milestone 3
 
 Built on 2026-07-29 against Expo SDK 57 (React Native 0.86) with a **local** build path — the Android
 SDK is already installed on the development machine, so `expo prebuild` + `expo run:android` needs no
