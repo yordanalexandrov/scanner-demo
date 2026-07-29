@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { attemptSchema } from './attempt.js';
 import { barcodeScanSchema } from './barcode.js';
 import { imageRecordSchema, imageSourceSchema, imageVariantSchema } from './image.js';
 
@@ -115,6 +116,39 @@ export const barcodeScanListResponseSchema = z.object({
 });
 
 export type BarcodeScanListResponse = z.infer<typeof barcodeScanListResponseSchema>;
+
+/**
+ * One benchmark record, as the app posts it.
+ *
+ * The app is the sole author of these rows and the server never fabricates one - ADR-15. `id` and
+ * `createdAt` are the server's to assign, exactly as for an upload; everything else was measured on
+ * the phone and is carried here unchanged.
+ *
+ * Not strict, deliberately, unlike the image upload metadata: this payload is nested several levels
+ * deep and a strict object at every level would reject a response from an engine that added a field
+ * to its own `usage` block. The schema still validates every field it knows about.
+ */
+export const attemptCreateSchema = attemptSchema.omit({ id: true, createdAt: true });
+
+export type AttemptCreate = z.infer<typeof attemptCreateSchema>;
+
+export const attemptCreateResponseSchema = z.object({
+  id: z.string(),
+});
+
+export type AttemptCreateResponse = z.infer<typeof attemptCreateResponseSchema>;
+
+/**
+ * Every attempt against one image, newest first.
+ *
+ * Unpaginated on purpose: this is the attempts for a single image, which is a handful of rows even
+ * after a dozen re-runs. The listing that needs paging is History, in phase 10.
+ */
+export const attemptListResponseSchema = z.object({
+  items: z.array(attemptSchema),
+});
+
+export type AttemptListResponse = z.infer<typeof attemptListResponseSchema>;
 
 /** The only unauthenticated response in the API. `uptimeMs` is monotonic, not a clock difference. */
 export const healthResponseSchema = z.object({
