@@ -75,7 +75,11 @@ export function HomeScreen() {
           </View>
 
           {health.health !== null && (
+            // Prefixed once the server stops answering. These are the last values it sent, and an
+            // unlabelled "up 1m 2s" under a red "Unreachable" reads as a live fact about a server
+            // that is down. Stale is fine to show; stale dressed as current is not.
             <Text style={styles.meta}>
+              {health.status === 'online' ? '' : 'last seen: '}
               version {health.health.version} · up {formatUptime(health.health.uptimeMs)}
             </Text>
           )}

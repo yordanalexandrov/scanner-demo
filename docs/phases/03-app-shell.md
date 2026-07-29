@@ -134,10 +134,17 @@ Environment (`app/.env.example`): `EXPO_PUBLIC_SERVER_URL`, `EXPO_PUBLIC_API_TOK
   the fallback is `node-linker=hoisted` for the app package — recorded here so it is not rediscovered.
   Note that `disableHierarchicalLookup`, which Expo's monorepo guide sets, must stay **off** under pnpm:
   every transitive dependency resolves through a nested `node_modules/.pnpm` path.
-- Verified on device 2026-07-29 — Samsung SM-S928B, Android 16. Criteria 1, 3 and 5 pass, and criterion
-  2 passes for the green half. **The red/green transition is still unverified**: it needs the server
-  stopped, and the server shares its box with production, so that is the owner's call to make rather
-  than something to do in passing.
+- Verified on device 2026-07-29 — Samsung SM-S928B, Android 16. **All acceptance criteria pass.**
+
+  The red/green transition was demonstrated against a **locally run server**, not the deployed one.
+  The deployed box carries production traffic, and the criterion tests the app's indicator rather than
+  any particular server, so stopping a local instance exercises the identical code path at no risk.
+  The phone reached it over `adb reverse tcp:3002`, which keeps the server on loopback instead of
+  exposing it to the LAN. Recorded here because the same trick is the cheapest way to re-run this
+  check in any later phase.
+
+  What makes the observation conclusive is the uptime: it went `1m 2s` → unreachable → `15s`. A cached
+  response could not have reset it. The app kept the same pid throughout — no restart.
 - `app/tsconfig.json` is rewritten by Expo's CLI whenever its `include` disagrees, and its writer drops
   every comment in the file. The comments there were restored once already. If they disappear again,
   that is the cause, not a careless edit.
