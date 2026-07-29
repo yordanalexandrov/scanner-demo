@@ -19,7 +19,13 @@ being ready and an EAN-13 being decoded, on real packaging, measured repeatedly.
    — *spec § Screens — Barcode scan*
 5. Continuous scanning: the camera is never unmounted or restarted between reads. A hit may freeze the
    preview visually, but the pipeline keeps running. — *spec § Screens — Barcode scan*
-6. 720p analysis stream.
+6. 720p analysis stream. **Not achieved — see _Measured on device_ below.** `useCameraFormat` is applied
+   and the format is passed to `<Camera>`, but vision-camera 4.7.3 builds the code scanner's
+   `ImageAnalysis` with no resolution selector at all
+   (`CameraSession+Configuration.kt:223`, `val analyzer = ImageAnalysis.Builder().build()`), unlike the
+   neighbouring path a dozen lines above it. CameraX therefore picks its own default and the stream runs
+   at 640×480. The screen reports the resolution the scanner itself hands back, so the figure on the
+   device is the measured one, not the one that was asked for.
 7. Torch toggle.
 8. Haptic feedback (`react-native-haptic-feedback`) and a short beep (`expo-audio`) the instant a code is
    decoded — fired before any rendering work, so neither is delayed by a re-render.
@@ -83,17 +89,63 @@ camera number.
 `t_scannerReady` is the moment the camera reports it is running for the **first** reading of a session,
 and the instant the previous scan was recorded for every reading after it.
 
-> **Amended during phase 04, for review.** The original wording was `t_callback - t_screenReady` with a
-> single fixed origin. That cannot hold together with scope items 5 and 12 and acceptance criteria 4 and
-> 7: the camera is never restarted between reads, so against a fixed origin the second scan of a session
-> would report the first scan's latency plus everything since, the tenth would report the length of the
-> whole session, and the median would describe how long the screen had been open rather than how fast it
-> decodes. Re-arming is the smallest change that keeps every other requirement of this phase intact.
+> **Amended during phase 04, accepted at the review.** The original wording was
+> `t_callback - t_screenReady` with a single fixed origin. That cannot hold together with scope items 5
+> and 12 and acceptance criteria 4 and 7: the camera is never restarted between reads, so against a fixed
+> origin the second scan of a session would report the first scan's latency plus everything since, the
+> tenth would report the length of the whole session, and the median would describe how long the screen
+> had been open rather than how fast it decodes. Re-arming is the smallest change that keeps every other
+> requirement of this phase intact.
 >
-> The consequence is deliberate and has to be read alongside the numbers: the **first** reading of a
-> session is exactly the figure originally specified, camera warm-up included, while every later reading
-> also contains the time the user spent moving the phone to the next package. The screen therefore flags
-> the first reading of each session, which is the data the risk note below asks the review to judge.
+> **Only the first reading of a session is quotable as a decode latency.** Every later one is bounded
+> below by the 800 ms dedupe window and above by how fast a person moves the phone to the next package;
+> the measurements below show both effects clearly. The behaviour is left as built and carried as a
+> documented property rather than redesigned, so the readings that answer acceptance criterion 4 keep
+> existing. The screen flags the first reading of each session; the stored row does not, so a figure
+> pulled from the export has to be attributed by session before it means anything.
+
+## Measured on device
+
+One run on an `SM-S928B (Android 16)`, 56 recorded scans of three physical products, against a local
+server. These are the numbers the review was held on; they belong here because every claim below is a
+property of the metric rather than of that particular handset.
+
+| | |
+|---|---|
+| Camera sessions logged | 3 (`onStarted`); one bout of **38 consecutive scans** ran inside a single session |
+| `onStopped` | **never fired** — 0 occurrences across all three sessions |
+| Analysis stream | **640×480**, not 720p |
+| First reading of a session | 1415.2 ms · 6293.8 ms |
+| All later readings (n=54) | median 832.3 ms, min 86.5, max 4944.7; only 9 of 54 below 800 ms |
+| Silent misreads | **3 of 56 (5.4%)** |
+
+The dedupe window is visible in the raw data as a hard floor: a code held in front of the lens records
+at `+0.8 s`, `+0.8 s`, `+0.8 s`, and the median of 832.3 ms is that window rather than a decode time.
+Removing the code from frame between scans did not fix it — it moved the median up to 1281.8 ms by adding
+the hand movement. Acceptance criterion 4 is satisfied and acceptance criterion 7 is satisfied
+arithmetically; the number the median reports is nonetheless not a decode latency.
+
+**The misreads are the more serious finding.** Three of the 56 rows are corrupted reads of
+`3800222850028` that differ from it only in the leading three or four digits and match the last eight or
+nine exactly — `6260222840028`, `9860022850028`, `8864222850018`. All three carry a **valid EAN-13 check
+digit**, so nothing downstream can catch them: the check digit catches every single-digit error but only
+about nine in ten multi-digit corruptions. The damage sits in the left half of the symbol, which is where
+EAN-13 encodes its first digit as a parity pattern.
+
+## Open questions
+
+Deliberately not answered in this phase, and not blocking it.
+
+- **Does 720p reduce the misread rate?** The resolution and the misreads have not been shown to be
+  connected. Patching vision-camera to pass the format to the code scanner's `ImageAnalysis` — the
+  neighbouring path already does it — would let the same code be scanned at both resolutions and the
+  error rates compared. That comparison is itself worth having.
+- **Or is the cause focus rather than resolution?** A barcode read at the wrong focal distance or through
+  motion blur fails in the same place, and this screen neither locks focus nor reports focus state. The
+  three failures came from one product in one bout, which is equally consistent with one bad angle.
+- **Would corroboration make a read trustworthy?** Requiring the same value from three or four
+  consecutive reads before accepting it would suppress a corruption that passes its check digit, at the
+  cost of a slower and differently-shaped measurement. Recorded here as a candidate, not built.
 
 ## Acceptance criteria
 
@@ -123,6 +175,11 @@ and the instant the previous scan was recorded for every reading after it.
   reason; ambient conditions are not recorded and should be noted in the README when reporting figures.
 - The first scan after screen mount includes camera warm-up. Decide during review whether to record it
   separately or discard the first scan of a session — the data will show whether it matters.
+  **Answered:** it matters, and the opposite way round to the one the note expected. The first reading is
+  the only usable one; see _Measured on device_.
+- `onStopped` is never delivered by vision-camera 4.7.3 on Android, so `clock.disarm()` does not run in
+  practice and the paired log line never appears. Harmless — `arm()` overwrites the origin on every start
+  — but it means camera sessions have to be counted from the `started` log alone.
 
 ## Review checkpoint
 

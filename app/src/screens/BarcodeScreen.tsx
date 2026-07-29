@@ -193,6 +193,13 @@ export function BarcodeScreen() {
     console.log('[barcode] camera session started');
   }, [clock]);
 
+  /**
+   * Measured on an SM-S928B: vision-camera 4.7.3 does not deliver this on Android - three camera
+   * sessions produced three `started` logs and no `stopped` one. It is kept because it is correct
+   * and costs nothing if the library starts firing it, but nothing may depend on it: the origin is
+   * safe regardless, since `arm()` overwrites it on every start, and camera sessions have to be
+   * counted from the `started` log alone.
+   */
   const onStopped = useCallback(() => {
     clock.disarm();
     console.log('[barcode] camera session stopped');
