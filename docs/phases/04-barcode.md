@@ -119,6 +119,19 @@ property of the metric rather than of that particular handset.
 | All later readings (n=54) | median 832.3 ms, min 86.5, max 4944.7; only 9 of 54 below 800 ms |
 | Silent misreads | **3 of 56 (5.4%)** |
 
+Where each acceptance criterion stands after that run:
+
+| # | Verified by |
+|---|---|
+| 1 | On device — value, haptic, beep and a latency figure, on real packaging |
+| 2 | **Structurally only.** `codeTypes: ['ean-13']` reaches ML Kit as `setBarcodeFormats(FORMAT_EAN_13)` (`CodeScannerPipeline.kt:25`, `CodeType.kt:29`), so a QR or Code 128 is never decoded rather than decoded and discarded — which is what the criterion asks. Presenting a non-EAN-13 symbol has not been tried on device |
+| 3 | On device — the screen showed `live · session 1` with zero scans on arrival, and `isActive` is `isFocused && isForeground` |
+| 4 | On device — 38 consecutive scans inside one logged camera session |
+| 5 | On device — repeats of one value land at `+0.8 s` intervals throughout the log |
+| 6 | On device — 56 rows served by `GET`, having survived a force-stop and relaunch mid-run |
+| 7 | On device — the on-screen median matched the listed session scans. See the caveat above on what that number means |
+| 8, 9 | `grep`, both empty |
+
 The dedupe window is visible in the raw data as a hard floor: a code held in front of the lens records
 at `+0.8 s`, `+0.8 s`, `+0.8 s`, and the median of 832.3 ms is that window rather than a decode time.
 Removing the code from frame between scans did not fix it — it moved the median up to 1281.8 ms by adding
