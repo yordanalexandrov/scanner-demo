@@ -17,6 +17,19 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
+    // Metro's config is loaded by Node, in CommonJS, before any bundling happens - it cannot be an
+    // ES module. Declaring the globals here rather than installing `globals` keeps the exception as
+    // small as the one file that needs it.
+    files: ['**/metro.config.js'],
+    languageOptions: {
+      sourceType: 'commonjs',
+      globals: { __dirname: 'readonly', module: 'writable', require: 'readonly' },
+    },
+    rules: {
+      '@typescript-eslint/no-require-imports': 'off',
+    },
+  },
+  {
     rules: {
       // Durations must come from packages/shared/src/timing.ts. Date.now() is for wall-clock
       // timestamps that get ordered, never subtracted - ADR-10, global constraint.

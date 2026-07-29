@@ -1,6 +1,13 @@
 # Phase 03 — App shell: dev build, navigation, Home
 
-**Status:** not started · **Depends on:** 01, 02 · **Source:** spec milestone 3
+**Status:** in review · **Depends on:** 01, 02 · **Source:** spec milestone 3
+
+Built on 2026-07-29 against Expo SDK 57 (React Native 0.86) with a **local** build path — the Android
+SDK is already installed on the development machine, so `expo prebuild` + `expo run:android` needs no
+Expo account and no cloud queue. There is no `eas.json`. The one surprise is recorded in
+[ADR-19](../decisions.md#adr-19--vision-camera-is-pinned-to-v4-and-the-android-project-is-generated):
+vision-camera 5 removed `useCodeScanner` and has no Android code scanning at all, so the library is
+pinned to 4.7.3.
 
 ## Goal
 
@@ -73,7 +80,8 @@ app/
 
 ## Key decisions
 
-[ADR-14](../decisions.md#adr-14--shared-package-build-and-thumbnail-authentication)
+[ADR-14](../decisions.md#adr-14--shared-package-build-and-thumbnail-authentication) ·
+[ADR-19](../decisions.md#adr-19--vision-camera-is-pinned-to-v4-and-the-android-project-is-generated)
 
 ## Interfaces
 
@@ -96,19 +104,38 @@ Environment (`app/.env.example`): `EXPO_PUBLIC_SERVER_URL`, `EXPO_PUBLIC_API_TOK
 4. `import { ocrResponseSchema } from "@scanner-demo/shared"` resolves and typechecks inside the app.
 5. Denying the camera permission shows the recoverable state with a working "open settings" button;
    granting it in settings and returning to the app clears the state without a restart.
-6. `grep -rniE '(api[_-]?key|secret|sk-|AIza)' app/src app/app.json` finds nothing. No provider
-   credential exists anywhere under `app/`.
+6. No provider credential exists anywhere under `app/`:
+
+   ```bash
+   grep -rniE '(AIza[0-9A-Za-z_-]{10,}|sk-[A-Za-z0-9]{16,}|(api[_-]?key|secret|token|password)[[:space:]]*[:=][[:space:]]*["'"'"'][^"'"'"']+)' app/src app/app.json
+   ```
+
+   **Amended 2026-07-29.** The original form of this criterion was
+   `grep -rniE '(api[_-]?key|secret|sk-|AIza)' app/src app/app.json`, which matches the *word* "secret"
+   and therefore fires on any comment explaining that the app holds none — including the one in
+   `app/src/config.ts` that cites the specification's own constraint by name. A check that cannot pass
+   while the code is correct gets ignored, so it now matches credential shapes and quoted assignments
+   rather than English prose. `EXPO_PUBLIC_API_TOKEN` still passes because the app only ever *reads* it
+   from the environment; a literal token pasted into a source file would not.
 7. `git check-ignore app/.env` confirms the real env file is ignored.
 
 ## Risks / unknowns
 
-- **Open question for the owner:** no Android device is currently attached and there is no global
-  `expo`/`eas` CLI. Which build path — local `expo run:android` (needs the Android SDK installed on this
-  machine) or EAS cloud builds (needs an Expo account)? This blocks the phase, not the plan.
-- Expo SDK version pins the compatible `react-native-vision-camera` major. Fix the SDK version here and
-  install vision-camera against it now, so phase 04 does not begin with a native upgrade.
+- ~~**Open question for the owner:** which build path?~~ Resolved 2026-07-29: **local**. The Android SDK
+  is present on the development machine (platform 35, build-tools 34/35, cmdline-tools, JDK 21), so
+  `expo prebuild --platform android` followed by `expo run:android` needs neither an Expo account nor a
+  cloud queue. No `eas.json` is committed; nothing in the setup prevents adding one later.
+- ~~Expo SDK version pins the compatible `react-native-vision-camera` major.~~ Fixed at Expo SDK 57 with
+  vision-camera **4.7.3, pinned exactly** — see
+  [ADR-19](../decisions.md#adr-19--vision-camera-is-pinned-to-v4-and-the-android-project-is-generated).
+  This pairing is one major behind on the camera library and is therefore verified by a Gradle build
+  here rather than assumed. Phase 04 begins with no native upgrade outstanding.
 - pnpm + Metro resolution is the most likely thing to go wrong. If `watchFolders` proves insufficient,
   the fallback is `node-linker=hoisted` for the app package — recorded here so it is not rediscovered.
+  Note that `disableHierarchicalLookup`, which Expo's monorepo guide sets, must stay **off** under pnpm:
+  every transitive dependency resolves through a nested `node_modules/.pnpm` path.
+- **Still unverified at the time of writing:** everything that needs a running app. No Android device is
+  attached, so criteria 1, 2, 3 and 5 wait on one being connected.
 
 ## Review checkpoint
 

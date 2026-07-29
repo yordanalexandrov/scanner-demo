@@ -60,7 +60,7 @@ each one. Phase 07 precedes 08 and 09 because it introduces the `OcrEngine` inte
 |---|---|---|---|
 | [01](01-scaffold.md) | Scaffold and shared contracts | complete | Schemas, CI, secret hook |
 | [02](02-server-images.md) | Server: image store, health, deployment | complete | Upload/serve/thumb over TLS |
-| [03](03-app-shell.md) | App shell: dev build, navigation, Home | not started | Dev build on device, health indicator |
+| [03](03-app-shell.md) | App shell: dev build, navigation, Home | in review | Dev build on device, health indicator |
 | [04](04-barcode.md) | Barcode scan screen | not started | Live decode + recorded latency |
 | [05](05-capture-mlkit.md) | Expiry capture, on-device OCR, date parser | not started | Capture, two variants, parser tests |
 | [06](06-library.md) | Image library | not started | Grid, filters, additive re-runs |
