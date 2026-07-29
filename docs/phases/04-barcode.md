@@ -1,6 +1,6 @@
 # Phase 04 — Barcode scan screen
 
-**Status:** not started · **Depends on:** 03 · **Source:** spec milestone 4
+**Status:** in review · **Depends on:** 03 · **Source:** spec milestone 4
 
 ## Goal
 
@@ -47,11 +47,22 @@ being ready and an EAN-13 being decoded, on real packaging, measured repeatedly.
 app/src/screens/BarcodeScreen.tsx        # replaces the phase 03 placeholder
 app/src/components/BarcodeResultCard.tsx
 app/src/hooks/useScreenReadyClock.ts     # marks t0 the moment the camera reports ready
+app/src/hooks/useIsForeground.ts         # the other half of isActive, alongside screen focus
 app/src/api/barcodeScans.ts
+app/src/device.ts                        # model + Android version, recorded on every row
+app/src/format.ts                        # a duration for reading; null renders "n/a", never "0 ms"
+app/src/assets.d.ts                      # typing for the asset import below
+app/assets/beep.wav                      # 70 ms generated tone, 1800 Hz, mono 16-bit PCM
+packages/shared/src/stats.ts             # median, so History and the export agree with this screen
+packages/shared/src/schemas/api.ts       # + the barcode-scan request and listing contracts
 server/src/routes/barcodeScans.ts
 server/src/db/schema.ts                  # + barcode_scans
 server/drizzle/                          # + migration
 ```
+
+`median` lives in `packages/shared` rather than in the screen that first needed it, for the reason the
+rest of that package exists: History and the JSON export in phase 10 report the same statistic, and two
+implementations of "the middle value" would disagree on even-length sets.
 
 ## Key decisions
 
@@ -65,9 +76,24 @@ POST /api/v1/barcode-scans   { value, decodeMs, device } → 201 { id }
 GET  /api/v1/barcode-scans?limit&cursor → 200 { items: BarcodeScan[], nextCursor: string | null }
 ```
 
-`decodeMs` is defined precisely: `t_callback - t_screenReady`, where `t_screenReady` is the moment the
-camera reports it is running, both from `performance.now()` on the phone. It is **not** measured from
-navigation start, because that would fold navigation animation into a camera number.
+`decodeMs` is defined precisely: `t_callback - t_scannerReady`, both from `performance.now()` on the
+phone. It is **not** measured from navigation start, because that would fold navigation animation into a
+camera number.
+
+`t_scannerReady` is the moment the camera reports it is running for the **first** reading of a session,
+and the instant the previous scan was recorded for every reading after it.
+
+> **Amended during phase 04, for review.** The original wording was `t_callback - t_screenReady` with a
+> single fixed origin. That cannot hold together with scope items 5 and 12 and acceptance criteria 4 and
+> 7: the camera is never restarted between reads, so against a fixed origin the second scan of a session
+> would report the first scan's latency plus everything since, the tenth would report the length of the
+> whole session, and the median would describe how long the screen had been open rather than how fast it
+> decodes. Re-arming is the smallest change that keeps every other requirement of this phase intact.
+>
+> The consequence is deliberate and has to be read alongside the numbers: the **first** reading of a
+> session is exactly the figure originally specified, camera warm-up included, while every later reading
+> also contains the time the user spent moving the phone to the next package. The screen therefore flags
+> the first reading of each session, which is the data the risk note below asks the review to judge.
 
 ## Acceptance criteria
 

@@ -13,6 +13,7 @@ import type { Db } from './db/client.js';
 import { InvalidImagePathError } from './lib/imagePaths.js';
 import authPlugin from './plugins/auth.js';
 import multipartPlugin from './plugins/multipart.js';
+import { createBarcodeScanRoutes } from './routes/barcodeScans.js';
 import { healthRoutes } from './routes/health.js';
 import { createImageRoutes } from './routes/images.js';
 
@@ -86,6 +87,7 @@ export async function buildServer(options: BuildServerOptions): Promise<FastifyI
 
   await fastify.register(healthRoutes);
   await fastify.register(createImageRoutes({ db, imageDir: env.imageDir, thumbDir: env.thumbDir }));
+  await fastify.register(createBarcodeScanRoutes({ db }));
 
   return fastify;
 }

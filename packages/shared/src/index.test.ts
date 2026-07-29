@@ -4,7 +4,9 @@ import {
   ANCHOR_PHRASES,
   MONTH_NAME_TABLES,
   PRICING_VERSION,
+  barcodeScanCreateSchema,
   elapsed,
+  median,
   now,
   ocrResponseSchema,
   pricing,
@@ -51,6 +53,31 @@ describe('shared contracts', () => {
     const spent = elapsed(start);
     expect(spent).toBeGreaterThanOrEqual(0);
     expect(elapsed(start)).toBeGreaterThanOrEqual(spent);
+  });
+
+  it('takes a median that an empty set cannot fake', () => {
+    // No measurements is not a measurement of zero - global constraint.
+    expect(median([])).toBeNull();
+    expect(median([42])).toBe(42);
+    // Odd length: the middle element, regardless of the order it arrived in.
+    expect(median([300, 100, 200])).toBe(200);
+    // Even length: the two straddling the middle, averaged.
+    expect(median([100, 200, 300, 400])).toBe(250);
+    // The caller's array is left in the order it renders.
+    const values = [300, 100, 200];
+    median(values);
+    expect(values).toEqual([300, 100, 200]);
+  });
+
+  it('accepts a barcode scan the phone can produce and nothing more', () => {
+    const scan = { value: '4006381333931', decodeMs: 412.7, device: 'Pixel 7 (Android 15)' };
+
+    expect(barcodeScanCreateSchema.parse(scan).value).toBe('4006381333931');
+    // The server assigns `id` and `scannedAt`; a client sending either is a defect, not a hint.
+    expect(barcodeScanCreateSchema.safeParse({ ...scan, scannedAt: 1 }).success).toBe(false);
+    expect(barcodeScanCreateSchema.safeParse({ ...scan, value: '400638133393' }).success).toBe(
+      false,
+    );
   });
 
   it('covers the same languages in the anchor and month tables', () => {
