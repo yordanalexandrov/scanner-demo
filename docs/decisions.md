@@ -35,6 +35,7 @@ had to resolve to be executable. One record per decision.
 | [17](#adr-17--nginx-and-certbot-instead-of-caddy) | nginx + certbot instead of Caddy | **Deviation** | 02 |
 | [18](#adr-18--the-benchmark-shares-the-box-with-production) | The benchmark shares the box with production | Accepted | 02, 07, 10 |
 | [19](#adr-19--vision-camera-is-pinned-to-v4-and-the-android-project-is-generated) | vision-camera pinned to v4; Android project generated, not committed | Accepted | 03, 04, 05 |
+| [20](#adr-20--a-capture-group-has-one-anchor-row-and-the-librarys-filters-read-the-group) | One anchor row per capture group; group-scoped Library filters | Proposed | 06, 10 |
 
 **Rule names, not rule numbers.** The specification numbers its disambiguation rules 1–4;
 [ADR-6](#adr-6--parser-rule-order-and-referencedate) inserts extraction as a step and renumbers them. To
@@ -725,3 +726,52 @@ delete the barcode path.
 knowingly, against the alternatives: a frame processor is forbidden outright, `expo-camera`'s
 `onBarcodeScanned` would abandon the mechanism the specification names, and waiting on v5 would block
 phase 04 on another project's schedule. `expo-camera` remains the fallback if v4 ever stops building.
+
+---
+
+## ADR-20 — A capture group has one anchor row, and the Library's filters read the group
+
+**Context.** Phase 05 records the two on-device runs of one capture against the **uploaded** row, with
+`inputVariant` naming which pixels were read — the original is archived in the background and does not
+always exist, so it cannot be the row an attempt hangs off
+([ADR-2](#adr-2--the-on-device-path-runs-against-both-image-variants),
+[ADR-3](#adr-3--images-are-stored-in-two-variants-linked-by-capturegroupid)).
+
+Phase 06 has to re-run methods over stored images, and that raises two questions the specification does
+not cover. Which row does a Library re-run record against? And when the Library filters on "has any
+method been run against this", is "this" a row or a capture?
+
+**Decision.**
+
+- Every capture group has one **anchor row**: its `upload` variant, or the only row present if the
+  archive never ran. Every attempt for the group is recorded against the anchor, whichever variant's
+  pixels were read, exactly as phase 05 already does.
+- `hasAttempts` and `hasDate` are evaluated **per capture group**, by joining `attempts.captureGroupId`
+  rather than `attempts.imageId`.
+
+**Rationale.** Recording a re-run against whichever row it happened to read would scatter one
+`(method, inputVariant)` group across two rows: half the `mlkit`/`original` runs would sit on the
+uploaded row because phase 05 put them there, and half on the original row because a re-run read it. The
+detail view would then show a median over half the runs, on two different screens, with nothing saying
+either figure was partial. The grouping is the comparison this harness exists to make, and it has to be
+one group.
+
+The filters follow from that. Attempts do not hang off the original row, so a per-row reading of "has
+been run" would answer *no* for every archived original — and `hasAttempts=false`, the filter whose
+whole purpose is finding packaging still to benchmark, would return mostly rows that have already been
+benchmarked twice.
+
+**Consequences.** The Library's detail view is per capture group rather than per row: it shows the
+variant that was tapped, offers both as run targets, and reads and writes attempts against the anchor.
+It says so on screen when the two differ, so the row an attempt landed on is never a surprise in the
+export.
+
+**This narrows acceptance criterion 3 of [phase 06](phases/06-library.md) as written.** The document
+says `hasAttempts=false` returns "exactly the images with zero attempt rows"; under this decision it
+returns exactly the images whose **capture group** has zero attempt rows, which differs precisely for an
+archived original whose group has been run. The phase document has been updated to match, and the
+server test asserting it names this ADR. If the per-row reading is what was wanted, this decision is
+withdrawn — but then the `variant=original` view of the Library has no usable "not yet run" filter, and
+`attempts.captureGroupId` loses the reason it was denormalised in the first place.
+
+**Status.** Proposed.

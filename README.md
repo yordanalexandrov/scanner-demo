@@ -20,12 +20,14 @@ comparability wins.
 
 ## Status
 
-**Phases 01 to 05 of 10 are complete; phase 06 is next.** Every record the harness stores is
-defined once in `packages/shared`. The server is deployed at `scanner.yo-po.eu`, stores, serves and
-thumbnails images, and records barcode decode latencies. The Android app builds as an Expo development
-build, navigates its screens, scans EAN-13 with the decode latency measured on the phone's monotonic
-clock, and photographs an expiry date, stores it in two variants, reads both with on-device ML Kit and
-extracts the date with the one shared parser.
+**Phases 01 to 05 of 10 are complete; phase 06 is built and awaiting its review on a device.** Every
+record the harness stores is defined once in `packages/shared`. The server is deployed at
+`scanner.yo-po.eu`, stores, serves and thumbnails images, and records barcode decode latencies. The
+Android app builds as an Expo development build, navigates its screens, scans EAN-13 with the decode
+latency measured on the phone's monotonic clock, and photographs an expiry date, stores it in two
+variants, reads both with on-device ML Kit and extracts the date with the one shared parser. The image
+library browses everything the server holds and re-runs any method over any stored image, which is what
+makes the three remaining engines cheap to add: they are measured against packaging already collected.
 See [`docs/phases/README.md`](docs/phases/README.md) for the build order and where the work stands.
 
 ## Layout
