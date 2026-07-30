@@ -63,11 +63,21 @@ each one. Phase 07 precedes 08 and 09 because it introduces the `OcrEngine` inte
 | [03](03-app-shell.md) | App shell: dev build, navigation, Home | complete | Dev build on device, health indicator |
 | [04](04-barcode.md) | Barcode scan screen | complete | Live decode + recorded latency |
 | [05](05-capture-mlkit.md) | Expiry capture, on-device OCR, date parser | complete | Capture, two variants, parser tests |
-| [06](06-library.md) | Image library | not started | Grid, filters, additive re-runs |
+| [06](06-library.md) | Image library | complete | Grid, filters, additive re-runs |
 | [07](07-ocr-sidecar.md) | Self-hosted OCR sidecar | not started | **Two stops:** spike report, then build-out |
 | [08](08-gcv.md) | Google Cloud Vision engine | not started | GCV over existing library images |
 | [09](09-vlm.md) | VLM engine | not started | Model answer vs parser answer, provider swap |
 | [10](10-history.md) | History and JSON export | not started | The POC's actual deliverable |
+
+Phase 06's server-side criteria (2, 3, 9, 10) are covered by tests. The rest were verified on an SM-S928B
+(Android 16) on 2026-07-30, against a local server seeded with 121 images: the grid reached the end of the
+set with **79 `/thumb` requests and not one full-resolution fetch**, the detail view showed every capture
+field, two runs produced two rows under one group with a median across them, `upload` and `original` stayed
+in separate groups, and a re-run rendered `Capture`/`Downscale`/`Upload` as `n/a` with `Download 24.3 ms`,
+its segments accounting for `Total 99.7 ms` to within 2.7 ms. Criterion 7's "a failure in one method does
+not prevent the others" is only partly exercised while `mlkit` is the sole available method; phase 07 is
+the first that can show it. That session also found the `<Image>` header bug now recorded in
+[ADR-14](../decisions.md#adr-14--shared-package-build-and-thumbnail-authentication).
 
 ## Global constraints
 
@@ -220,6 +230,6 @@ Not blocking this plan, but blocking the phases they belong to.
 
 | Question | Blocks | Status |
 |---|---|---|
-| `scanner.yo-po.eu` must resolve to `167.235.146.155` before certbot can issue a certificate — an `A` record at the registrar. | [02](02-server-images.md) | **open** |
-| Local `expo run:android` (needs the Android SDK here) or EAS cloud builds (needs an Expo account)? No device is currently attached. | [03](03-app-shell.md) | **open** |
+| `scanner.yo-po.eu` must resolve to `167.235.146.155` before certbot can issue a certificate — an `A` record at the registrar. | [02](02-server-images.md) | resolved 2026-07-30 — the record is in place and the vhost serves over TLS |
+| Local `expo run:android` (needs the Android SDK here) or EAS cloud builds (needs an Expo account)? | [03](03-app-shell.md) | resolved 2026-07-30 — local `expo run:android` against an attached device |
 | SSH access to the deployment box, and who deploys. | [02](02-server-images.md) | resolved 2026-07-28 — see [deployment-target.md](../deployment-target.md) |

@@ -75,6 +75,10 @@ export function discard(uri: string | null | undefined): void {
 /**
  * Directories the capture flow leaves scratch files in. `takePhoto` writes into the cache root with
  * a library-specific prefix; the manipulator and the picker each own a subdirectory of it.
+ *
+ * A Library re-run's downloads are deliberately **not** here: they live in their own directory and
+ * are swept by `lib/rerun.ts` instead. Sweeping them from this screen would be the one unsafe case -
+ * a re-run started seconds ago on another screen is still downloading into it.
  */
 const CAPTURE_TEMP_PREFIX = 'mrousavy';
 const CAPTURE_TEMP_DIRS = ['ImageManipulator', 'ImagePicker'];

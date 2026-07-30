@@ -17,11 +17,18 @@ import { colors, radius, spacing } from '../theme';
  */
 
 /**
- * `Result` is excluded because it is not a destination: it needs an image ID and is reached from a
- * capture, never from a list of places to go. Excluding it here is also what keeps this list to the
- * routes that take no parameters, so `navigate` stays typed without a cast.
+ * The routes that take no parameters, minus the one already being looked at.
+ *
+ * Derived rather than listed: a screen that needs an image - `Result`, `ImageDetail` - is not a place
+ * to go from here, it is somewhere a capture or a grid tile leads to. Stating the rule as a type
+ * means adding such a screen cannot silently put an un-navigable entry on this list, and `navigate`
+ * stays typed without a cast.
  */
-type Destination = Exclude<keyof RootStackParamList, 'Home' | 'Result'>;
+type ParameterlessRoute = {
+  [Route in keyof RootStackParamList]: RootStackParamList[Route] extends undefined ? Route : never;
+}[keyof RootStackParamList];
+
+type Destination = Exclude<ParameterlessRoute, 'Home'>;
 
 const DESTINATIONS: ReadonlyArray<{ route: Destination; title: string; subtitle: string }> = [
   { route: 'Barcode', title: 'Barcode', subtitle: 'Scan EAN-13 and record decode latency' },

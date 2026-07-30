@@ -13,3 +13,26 @@ import type { Millis } from '@scanner-demo/shared';
 export function formatMs(value: Millis | null): string {
   return value === null ? 'n/a' : `${value.toFixed(1)} ms`;
 }
+
+/**
+ * A file size, for reading.
+ *
+ * It exists because of one specific decision the operator has to make: a full-resolution original
+ * can be several megabytes, and re-running the on-device path over it means pulling those bytes down
+ * a mobile connection. The size is shown next to the button rather than discovered afterwards.
+ */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1_000) {
+    return `${bytes} B`;
+  }
+  if (bytes < 1_000_000) {
+    return `${(bytes / 1_000).toFixed(0)} kB`;
+  }
+  return `${(bytes / 1_000_000).toFixed(1)} MB`;
+}
+
+/** A wall-clock instant, for ordering runs by eye. Never used as one end of a duration - ADR-10. */
+export function formatTimestamp(unixMs: number): string {
+  const at = new Date(unixMs);
+  return `${at.toLocaleDateString()} ${at.toLocaleTimeString()}`;
+}

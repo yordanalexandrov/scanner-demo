@@ -29,12 +29,13 @@ had to resolve to be executable. One record per decision.
 | [11](#adr-11--cost-estimates-come-from-a-versioned-price-table) | Versioned price table with `pricingVersion` | Proposed | 01, 08, 09 |
 | [12](#adr-12--the-self-hosted-engine-defaults-to-chineseenglish-models) | Self-hosted engine defaults to ch+en models | Provisional | 07 |
 | [13](#adr-13--idea-is-gitignored) | `.idea/` is gitignored | Accepted | 01 |
-| [14](#adr-14--shared-package-build-and-thumbnail-authentication) | Shared package build; thumbnail auth | Proposed | 01, 06 |
+| [14](#adr-14--shared-package-build-and-thumbnail-authentication) | Shared package build; thumbnail auth | Accepted | 01, 06 |
 | [15](#adr-15--the-app-is-the-sole-author-of-attempt-rows) | The app is the sole author of attempt rows | **Deviation** | 05–10 |
 | [16](#adr-16--separators-and-year-widths-are-normalised-before-matching) | Separators and year widths normalised before matching | Proposed | 05 |
 | [17](#adr-17--nginx-and-certbot-instead-of-caddy) | nginx + certbot instead of Caddy | **Deviation** | 02 |
 | [18](#adr-18--the-benchmark-shares-the-box-with-production) | The benchmark shares the box with production | Accepted | 02, 07, 10 |
 | [19](#adr-19--vision-camera-is-pinned-to-v4-and-the-android-project-is-generated) | vision-camera pinned to v4; Android project generated, not committed | Accepted | 03, 04, 05 |
+| [20](#adr-20--a-capture-group-has-one-anchor-row-and-the-librarys-filters-read-the-group) | One anchor row per capture group; group-scoped Library filters | Accepted | 06, 10 |
 
 **Rule names, not rule numbers.** The specification numbers its disambiguation rules 1–4;
 [ADR-6](#adr-6--parser-rule-order-and-referencedate) inserts extraction as a step and renumbers them. To
@@ -523,7 +524,25 @@ model is "the repository is public"; a header on an already-authenticated client
 orders it first. If header-authenticated images prove unreliable in the RN image pipeline, the fallback is
 a short-lived signed URL — a change confined to one server route and one client helper.
 
-**Status.** Proposed.
+**The fallback was not needed, but the mechanism has one trap.** Verified on a device in phase 06:
+React Native 0.86's `Image.android.js` lifts `headers` into the native prop **only in its array branch**.
+
+```js
+if (Array.isArray(source_)) {
+  const {headers: sourceHeaders, ...} = source_[0];
+  if (sourceHeaders != null) nativeProps.headers = sourceHeaders;
+} else {
+  const {uri, width, height} = source_;   // headers is never read
+```
+
+Passed as a plain `{ uri, headers }` object the headers are dropped with no warning, Fresco requests the
+image unauthenticated, the server answers 401, and the image pipeline renders a **blank tile** rather than
+an error — a failure that looks like a styling problem. Measured before the fix: 12 thumbnail requests,
+all 401. Every authenticated image source therefore goes through the helpers in `app/src/api/images.ts`,
+which return the one-element array form, and the reason is commented there so it is not "simplified" back.
+
+**Status.** Accepted 2026-07-30 — header authentication is verified working on the device, so the signed-URL
+fallback stays unused.
 
 ---
 
@@ -725,3 +744,55 @@ delete the barcode path.
 knowingly, against the alternatives: a frame processor is forbidden outright, `expo-camera`'s
 `onBarcodeScanned` would abandon the mechanism the specification names, and waiting on v5 would block
 phase 04 on another project's schedule. `expo-camera` remains the fallback if v4 ever stops building.
+
+---
+
+## ADR-20 — A capture group has one anchor row, and the Library's filters read the group
+
+**Context.** Phase 05 records the two on-device runs of one capture against the **uploaded** row, with
+`inputVariant` naming which pixels were read — the original is archived in the background and does not
+always exist, so it cannot be the row an attempt hangs off
+([ADR-2](#adr-2--the-on-device-path-runs-against-both-image-variants),
+[ADR-3](#adr-3--images-are-stored-in-two-variants-linked-by-capturegroupid)).
+
+Phase 06 has to re-run methods over stored images, and that raises two questions the specification does
+not cover. Which row does a Library re-run record against? And when the Library filters on "has any
+method been run against this", is "this" a row or a capture?
+
+**Decision.**
+
+- Every capture group has one **anchor row**: its `upload` variant, or the only row present if the
+  archive never ran. Every attempt for the group is recorded against the anchor, whichever variant's
+  pixels were read, exactly as phase 05 already does.
+- `hasAttempts` and `hasDate` are evaluated **per capture group**, by joining `attempts.captureGroupId`
+  rather than `attempts.imageId`.
+
+**Rationale.** Recording a re-run against whichever row it happened to read would scatter one
+`(method, inputVariant)` group across two rows: half the `mlkit`/`original` runs would sit on the
+uploaded row because phase 05 put them there, and half on the original row because a re-run read it. The
+detail view would then show a median over half the runs, on two different screens, with nothing saying
+either figure was partial. The grouping is the comparison this harness exists to make, and it has to be
+one group.
+
+The filters follow from that. Attempts do not hang off the original row, so a per-row reading of "has
+been run" would answer *no* for every archived original — and `hasAttempts=false`, the filter whose
+whole purpose is finding packaging still to benchmark, would return mostly rows that have already been
+benchmarked twice.
+
+**Consequences.** The Library's detail view is per capture group rather than per row: it shows the
+variant that was tapped, offers both as run targets, and reads and writes attempts against the anchor.
+It says so on screen when the two differ, so the row an attempt landed on is never a surprise in the
+export.
+
+**This narrows acceptance criterion 3 of [phase 06](phases/06-library.md) as written.** The document
+says `hasAttempts=false` returns "exactly the images with zero attempt rows"; under this decision it
+returns exactly the images whose **capture group** has zero attempt rows, which differs precisely for an
+archived original whose group has been run. The phase document has been updated to match, and the
+server test asserting it names this ADR. If the per-row reading is what was wanted, this decision is
+withdrawn — but then the `variant=original` view of the Library has no usable "not yet run" filter, and
+`attempts.captureGroupId` loses the reason it was denormalised in the first place.
+
+**Status.** Accepted 2026-07-30, together with the narrowing of phase 06's acceptance criterion 3 that
+it entails. The per-row alternative was put alongside it and rejected: it either splits a
+`(method, inputVariant)` group's medians across two rows, or forces the attempts endpoint to be keyed by
+capture group instead — which is this decision reached by a longer route.

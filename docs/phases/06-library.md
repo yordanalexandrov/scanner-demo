@@ -15,7 +15,8 @@ being re-shot for each one.
 1. Thumbnail grid, newest first, paginated. Thumbnails come from `GET /api/v1/images/:id/thumb`; the grid
    never downloads full-resolution images. — *spec § Screens — Image library*
 2. Filters: by `source` (camera/gallery), by date, by whether any method has been run, by whether a date
-   was successfully extracted, and by `variant` (upload/original).
+   was successfully extracted, and by `variant` (upload/original). "Has been run" and "extracted a date"
+   are answered per **capture group**, not per row — [ADR-20](../decisions.md#adr-20--a-capture-group-has-one-anchor-row-and-the-librarys-filters-read-the-group).
    — *spec § Screens — Image library*, [ADR-3](../decisions.md#adr-3--images-are-stored-in-two-variants-linked-by-capturegroupid)
 3. Detail view: the full image, its capture metadata, **every attempt ever run against it**, and the same
    four method buttons.
@@ -52,7 +53,10 @@ app/src/components/
 ├── AttemptGroupList.tsx                 # grouped by (method, inputVariant), with medians
 └── RerunAllButton.tsx
 app/src/lib/rerun.ts                     # downloads the variant, then reuses runMethod.ts from phase 05
+app/src/lib/captureGroup.ts              # the anchor row and variant order — ADR-20
+packages/shared/src/attemptGroups.ts     # the grouping and the medians, with tests
 server/src/routes/images.ts              # + filters, indexes
+server/src/lib/imageQuery.ts             # the list query, shared with the plan check in the tests
 server/drizzle/                          # + indexes migration
 ```
 
@@ -61,7 +65,8 @@ server/drizzle/                          # + indexes migration
 [ADR-2](../decisions.md#adr-2--the-on-device-path-runs-against-both-image-variants) ·
 [ADR-3](../decisions.md#adr-3--images-are-stored-in-two-variants-linked-by-capturegroupid) ·
 [ADR-10](../decisions.md#adr-10--latency-segments-clocks-and-what-may-be-subtracted) ·
-[ADR-15](../decisions.md#adr-15--the-app-is-the-sole-author-of-attempt-rows)
+[ADR-15](../decisions.md#adr-15--the-app-is-the-sole-author-of-attempt-rows) ·
+[ADR-20](../decisions.md#adr-20--a-capture-group-has-one-anchor-row-and-the-librarys-filters-read-the-group)
 
 ## Interfaces
 
@@ -70,6 +75,7 @@ GET /api/v1/images
   ?limit&cursor
   &source=camera|gallery
   &variant=upload|original
+  &captureGroupId           every variant of one capture — the detail view needs the group
   &from&to                  capturedAt range
   &hasAttempts=true|false
   &hasDate=true|false       any attempt whose parse.expiry is non-null
@@ -77,7 +83,20 @@ GET /api/v1/images
 ```
 
 `hasDate` counts an `expired` result as a successful extraction, per
-[ADR-7](../decisions.md#adr-7--expired-dates-are-flagged-not-discarded).
+[ADR-7](../decisions.md#adr-7--expired-dates-are-flagged-not-discarded). Both booleans are evaluated
+over the row's whole capture group, per
+[ADR-20](../decisions.md#adr-20--a-capture-group-has-one-anchor-row-and-the-librarys-filters-read-the-group).
+
+`captureGroupId` is an addition to this list, made while implementing it: the detail view has to offer
+both variants as run targets, and the API has no other way to ask for them. There is no endpoint
+returning one image's metadata as JSON — `/api/v1/images/:id` answers with bytes — so the grid passes the
+record it already holds to the detail screen as a navigation parameter, and the screen fetches the rest
+of the group by this filter.
+
+The date filter offers periods (24 h / 7 d / 30 d / any) rather than a calendar, because a date picker is
+a native dependency and the question being asked while collecting a dataset is "the ones I shot today".
+The server takes an arbitrary `from`/`to` range regardless, so a picker is a UI change later, not an API
+one.
 
 Re-run reuses `runMethod.ts` from phase 05 unchanged; only the image source differs (downloaded rather
 than freshly captured). No second orchestration path exists.
@@ -88,7 +107,10 @@ than freshly captured). No second orchestration path exists.
    server's access log: only `/thumb` requests during a scroll.
 2. Each filter narrows the set correctly, and combinations compose. Verify each against a direct SQL
    count on the server database.
-3. `hasAttempts=false` returns exactly the images with zero attempt rows.
+3. `hasAttempts=false` returns exactly the images whose **capture group** has zero attempt rows. This
+   narrows what this document said before implementation — "the images with zero attempt rows" — and the
+   two differ precisely for an archived original whose group has been benchmarked, because attempts hang
+   off the group's uploaded row: [ADR-20](../decisions.md#adr-20--a-capture-group-has-one-anchor-row-and-the-librarys-filters-read-the-group).
 4. Tapping an image opens the detail view with the full image, all capture metadata, and every attempt.
 5. Running the on-device method twice on the same image produces **two** attempt rows; neither replaces
    the other, and both appear under the same group with a median across them.

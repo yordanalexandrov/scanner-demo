@@ -34,7 +34,12 @@ export const timingSchema = z.object({
   /** Server-reported, from the server's clock. Never subtracted from a phone-side figure. */
   engineMs: z.number().nullable(),
   serverTotalMs: z.number().nullable(),
-  parseMs: z.number(),
+  /**
+   * `null` when the parser never ran, which is what a failed recognition means: there was no text to
+   * parse. It was `z.number()` until a Library re-run made the case visible - a failed run recorded
+   * `0`, and a zero-duration parse is a measurement, not the absence of one.
+   */
+  parseMs: z.number().nullable(),
   /** Measured entirely on the phone, one clock, start of the user-visible action to parsed result. */
   totalMs: z.number(),
 });
