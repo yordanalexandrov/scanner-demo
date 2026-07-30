@@ -45,6 +45,15 @@ export const IMAGE_LIST_DEFAULT_LIMIT = 50;
 export const IMAGE_LIST_MAX_LIMIT = 100;
 
 /**
+ * A boolean query parameter, spelled out.
+ *
+ * Deliberately not `z.coerce.boolean()`, which reads the string `"false"` as `true` - every
+ * non-empty string is truthy. A filter that silently inverts itself would make the Library's counts
+ * disagree with the database's and nothing on screen would say so.
+ */
+const queryBooleanSchema = z.enum(['true', 'false']).transform((value) => value === 'true');
+
+/**
  * Query parameters arrive as strings, hence the coercion.
  *
  * `from`/`to` are unix ms and filter on `capturedAt` - when the photo was taken, which is what a
@@ -59,6 +68,22 @@ export const imageListQuerySchema = z.object({
   variant: imageVariantSchema.optional(),
   from: z.coerce.number().int().optional(),
   to: z.coerce.number().int().optional(),
+  /**
+   * Every variant of one physical capture. The Library detail view needs the whole group, because
+   * both variants are run targets and only one of them is guaranteed to exist - ADR-3.
+   */
+  captureGroupId: z.string().min(1).optional(),
+  /**
+   * Whether any method has been run against the image's **capture group**, not against the row
+   * itself. Attempts hang off the group's uploaded row whichever variant was read - ADR-20 - so a
+   * per-row reading would report every archived original as never benchmarked.
+   */
+  hasAttempts: queryBooleanSchema.optional(),
+  /**
+   * Whether any attempt in the group extracted a date. An `expired` result counts as extracted:
+   * the engine read the date correctly and the product is old - ADR-7.
+   */
+  hasDate: queryBooleanSchema.optional(),
 });
 
 export type ImageListQuery = z.infer<typeof imageListQuerySchema>;

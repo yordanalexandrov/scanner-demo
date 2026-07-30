@@ -5,7 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import sharp from 'sharp';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { parseExpiryDate } from '@scanner-demo/shared';
+import { imageListQuerySchema, parseExpiryDate } from '@scanner-demo/shared';
 import type {
   Attempt,
   AttemptCreate,
@@ -18,6 +18,8 @@ import { openDatabase } from './db/client.js';
 import type { DbHandle } from './db/client.js';
 import { loadEnv } from './env.js';
 import type { Env } from './env.js';
+import type { ListCursor } from './lib/cursor.js';
+import { imageListQuery } from './lib/imageQuery.js';
 import { THUMBNAIL_LONG_EDGE_PX } from './lib/thumbnails.js';
 
 /**
@@ -398,6 +400,19 @@ describe('thumbnails', () => {
     expect(metadata.width).toBe(100);
     expect(metadata.height).toBe(80);
   });
+
+  it('requires the bearer token, so the grid must send it - phase 06 criterion 9', async () => {
+    const { imageId } = await upload(await testImage(400, 300));
+    const url = `/api/v1/images/${imageId}/thumb`;
+
+    // The Library's tiles are `<Image>` views, and an `<Image>` pointed at a bare URL renders as an
+    // empty box rather than as an error. The token goes on the request instead - ADR-14.
+    expect((await app.inject({ method: 'GET', url })).statusCode).toBe(401);
+    expect(
+      (await app.inject({ method: 'GET', url, headers: { authorization: `Bearer ${TOKEN}` } }))
+        .statusCode,
+    ).toBe(200);
+  });
 });
 
 describe('listing', () => {
@@ -588,77 +603,79 @@ describe('barcode scans', () => {
   });
 });
 
-describe('attempts', () => {
-  /** A minimal on-device attempt. Overrides let each test change only what it is about. */
-  function attemptBody(imageId: string, overrides: Partial<AttemptCreate> = {}): AttemptCreate {
-    return {
-      imageId,
-      captureGroupId: randomUUID(),
-      method: 'mlkit',
-      inputVariant: 'upload',
-      device: 'Pixel Test (Android 15)',
-      ocr: {
-        engine: 'mlkit',
-        rawText: 'EXP 12.03.2027',
-        blocks: [{ text: 'EXP 12.03.2027', bbox: [10, 20, 200, 40], confidence: null }],
-        engineMs: 84.2,
-        engineMsScope: 'inference',
-        serverTotalMs: null,
-        imageWidth: 1600,
-        imageHeight: 1200,
-        usage: null,
-        costEstimateUsd: 0,
-        pricingVersion: 'unset',
-      },
-      parse: parseExpiryDate(
-        [{ text: 'EXP 12.03.2027', bbox: [10, 20, 200, 40], confidence: null }],
-        { referenceDate: new Date(Date.UTC(2025, 5, 1)) },
-      ),
-      vlm: null,
-      timing: {
-        captureMs: 210.5,
-        downscaleMs: 44.1,
-        uploadMs: 512.9,
-        downloadMs: null,
-        requestMs: null,
-        engineMs: null,
-        serverTotalMs: null,
-        parseMs: 1.4,
-        totalMs: 852.6,
-      },
-      referenceDate: '2025-06-01',
+/** A minimal on-device attempt. Overrides let each test change only what it is about. */
+function attemptBody(imageId: string, overrides: Partial<AttemptCreate> = {}): AttemptCreate {
+  return {
+    imageId,
+    captureGroupId: randomUUID(),
+    method: 'mlkit',
+    inputVariant: 'upload',
+    device: 'Pixel Test (Android 15)',
+    ocr: {
+      engine: 'mlkit',
+      rawText: 'EXP 12.03.2027',
+      blocks: [{ text: 'EXP 12.03.2027', bbox: [10, 20, 200, 40], confidence: null }],
+      engineMs: 84.2,
+      engineMsScope: 'inference',
+      serverTotalMs: null,
+      imageWidth: 1600,
+      imageHeight: 1200,
+      usage: null,
+      costEstimateUsd: 0,
       pricingVersion: 'unset',
-      promptVersion: null,
-      error: null,
-      ...overrides,
-    };
-  }
+    },
+    parse: parseExpiryDate(
+      [{ text: 'EXP 12.03.2027', bbox: [10, 20, 200, 40], confidence: null }],
+      {
+        referenceDate: new Date(Date.UTC(2025, 5, 1)),
+      },
+    ),
+    vlm: null,
+    timing: {
+      captureMs: 210.5,
+      downscaleMs: 44.1,
+      uploadMs: 512.9,
+      downloadMs: null,
+      requestMs: null,
+      engineMs: null,
+      serverTotalMs: null,
+      parseMs: 1.4,
+      totalMs: 852.6,
+    },
+    referenceDate: '2025-06-01',
+    pricingVersion: 'unset',
+    promptVersion: null,
+    error: null,
+    ...overrides,
+  };
+}
 
-  async function postAttempt(
-    imageId: string,
-    overrides: Partial<AttemptCreate> = {},
-  ): Promise<{ statusCode: number; id: string }> {
-    const response = await app.inject({
-      method: 'POST',
-      url: '/api/v1/attempts',
-      headers: { authorization: `Bearer ${TOKEN}` },
-      payload: attemptBody(imageId, overrides),
-    });
+async function postAttempt(
+  imageId: string,
+  overrides: Partial<AttemptCreate> = {},
+): Promise<{ statusCode: number; id: string }> {
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/v1/attempts',
+    headers: { authorization: `Bearer ${TOKEN}` },
+    payload: attemptBody(imageId, overrides),
+  });
 
-    return {
-      statusCode: response.statusCode,
-      id: response.statusCode === 201 ? (response.json() as { id: string }).id : '',
-    };
-  }
+  return {
+    statusCode: response.statusCode,
+    id: response.statusCode === 201 ? (response.json() as { id: string }).id : '',
+  };
+}
 
-  function listAttempts(imageId: string) {
-    return app.inject({
-      method: 'GET',
-      url: `/api/v1/images/${imageId}/attempts`,
-      headers: { authorization: `Bearer ${TOKEN}` },
-    });
-  }
+function listAttempts(imageId: string) {
+  return app.inject({
+    method: 'GET',
+    url: `/api/v1/images/${imageId}/attempts`,
+    headers: { authorization: `Bearer ${TOKEN}` },
+  });
+}
 
+describe('attempts', () => {
   it('round-trips a record through the JSON payload, not through the flat columns', async () => {
     const { imageId } = await upload(await testImage(320, 240));
     const created = await postAttempt(imageId);
@@ -712,10 +729,14 @@ describe('attempts', () => {
   it('stores a failed run as a row rather than as a gap - criterion 13', async () => {
     const { imageId } = await upload(await testImage(320, 240));
 
+    const body = attemptBody(imageId);
     const created = await postAttempt(imageId, {
       ocr: null,
       parse: null,
       error: 'ML Kit returned no result',
+      // Nothing was parsed, so there is no parse time. `null`, never `0` - a run that failed before
+      // the parser was reached must not contribute a zero-duration parse to any average.
+      timing: { ...body.timing, parseMs: null },
     });
 
     expect(created.statusCode).toBe(201);
@@ -724,6 +745,7 @@ describe('attempts', () => {
     expect(items.items[0]?.error).toBe('ML Kit returned no result');
     expect(items.items[0]?.ocr).toBeNull();
     expect(items.items[0]?.parse).toBeNull();
+    expect(items.items[0]?.timing.parseMs).toBeNull();
   });
 
   it('refuses an attempt against an image that does not exist', async () => {
@@ -749,6 +771,206 @@ describe('attempts', () => {
     });
 
     expect(response.statusCode).toBe(400);
+  });
+});
+
+describe('library filters', () => {
+  function list(query: string) {
+    return app.inject({
+      method: 'GET',
+      url: `/api/v1/images${query}`,
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
+  }
+
+  /** The same question, asked of the database directly - criterion 2. */
+  function countWhere(predicate: string): number {
+    const row = handle.db.$client
+      .prepare(`select count(*) as n from images where ${predicate}`)
+      .get() as { n: number };
+    return row.n;
+  }
+
+  /**
+   * Four images across three capture groups, in the shapes the Library has to tell apart:
+   *
+   * - **A** camera capture, uploaded variant, benchmarked, a date extracted.
+   * - **B** the archived full-resolution original of A. No attempt row of its own - both of A's
+   *   on-device runs hang off the uploaded row - ADR-2, ADR-20.
+   * - **C** gallery import, one run that failed, so no date.
+   * - **D** camera capture, nothing has been run against it.
+   */
+  async function fixture() {
+    const groupA = randomUUID();
+    const groupC = randomUUID();
+    const groupD = randomUUID();
+    const bytes = await testImage(64, 64);
+
+    const a = await upload(bytes, { captureGroupId: groupA, variant: 'upload', capturedAt: 1_000 });
+    const b = await upload(bytes, {
+      captureGroupId: groupA,
+      variant: 'original',
+      downscaled: false,
+      capturedAt: 1_000,
+    });
+    const c = await upload(bytes, {
+      captureGroupId: groupC,
+      source: 'gallery',
+      torch: null,
+      capturedAt: 5_000,
+    });
+    const d = await upload(bytes, { captureGroupId: groupD, capturedAt: 9_000 });
+
+    // The on-device path records one attempt per variant, both against the uploaded row - ADR-2.
+    await postAttempt(a.imageId, { captureGroupId: groupA, inputVariant: 'upload' });
+    await postAttempt(a.imageId, { captureGroupId: groupA, inputVariant: 'original' });
+    // A failure is a row, not a gap - ADR-15. It has been run, and it has no date.
+    await postAttempt(c.imageId, {
+      captureGroupId: groupC,
+      ocr: null,
+      parse: null,
+      error: 'ML Kit failed to read the image',
+    });
+
+    return { groupA, a, b, c, d };
+  }
+
+  it('narrows to the same set the database does, and the filters compose - criterion 2', async () => {
+    const { groupA } = await fixture();
+
+    // Written out here rather than imported from the route, so that this is a second opinion about
+    // what each filter means and not the implementation agreeing with itself.
+    const sameGroup = 'attempts.captureGroupId = images.captureGroupId';
+    const hasAttemptRow = `exists (select 1 from attempts where ${sameGroup})`;
+    const hasDateRow = `exists (select 1 from attempts where ${sameGroup} and attempts.expiryDate is not null)`;
+
+    const cases: { query: string; sql: string; expected: number }[] = [
+      { query: '?source=camera', sql: "source = 'camera'", expected: 3 },
+      { query: '?source=gallery', sql: "source = 'gallery'", expected: 1 },
+      { query: '?variant=original', sql: "variant = 'original'", expected: 1 },
+      {
+        query: `?captureGroupId=${groupA}`,
+        sql: `captureGroupId = '${groupA}'`,
+        expected: 2,
+      },
+      { query: '?from=2000&to=6000', sql: 'capturedAt between 2000 and 6000', expected: 1 },
+      { query: '?hasAttempts=true', sql: hasAttemptRow, expected: 3 },
+      { query: '?hasAttempts=false', sql: `not ${hasAttemptRow}`, expected: 1 },
+      { query: '?hasDate=true', sql: hasDateRow, expected: 2 },
+      { query: '?hasDate=false', sql: `not ${hasDateRow}`, expected: 2 },
+      // Combinations compose rather than replacing one another.
+      {
+        query: '?source=camera&hasDate=false',
+        sql: `source = 'camera' and not ${hasDateRow}`,
+        expected: 1,
+      },
+      {
+        query: '?variant=upload&hasAttempts=true',
+        sql: `variant = 'upload' and ${hasAttemptRow}`,
+        expected: 2,
+      },
+    ];
+
+    for (const { query, sql: predicate, expected } of cases) {
+      const items = (await list(query)).json() as { items: unknown[] };
+      expect(items.items, query).toHaveLength(expected);
+      expect(countWhere(predicate), query).toBe(expected);
+    }
+  });
+
+  it('returns exactly the un-run images for hasAttempts=false - criterion 3', async () => {
+    const { d } = await fixture();
+
+    const items = (await list('?hasAttempts=false')).json() as { items: { id: string }[] };
+
+    expect(items.items.map((row) => row.id)).toEqual([d.imageId]);
+  });
+
+  it('reads "has been run" per capture group, not per row - ADR-20', async () => {
+    const { b } = await fixture();
+
+    // B carries no attempt row of its own: the `original` run that read its pixels was recorded
+    // against the group's uploaded row. Answering per row would file the one variant that was
+    // benchmarked twice as never benchmarked at all.
+    const own = (await listAttempts(b.imageId)).json() as { items: unknown[] };
+    expect(own.items).toHaveLength(0);
+
+    const runs = (await list('?hasAttempts=true')).json() as { items: { id: string }[] };
+    expect(runs.items.map((row) => row.id)).toContain(b.imageId);
+  });
+
+  it('counts an expired date as a date - ADR-7', async () => {
+    const groupId = randomUUID();
+    const { imageId } = await upload(await testImage(64, 64), { captureGroupId: groupId });
+
+    // Two years before the reference date the parser was given, so it parses cleanly and expires.
+    await postAttempt(imageId, {
+      captureGroupId: groupId,
+      parse: parseExpiryDate([{ text: 'EXP 12.03.2023', bbox: null, confidence: null }], {
+        referenceDate: new Date(Date.UTC(2025, 5, 1)),
+      }),
+    });
+
+    const attempts = (await listAttempts(imageId)).json() as { items: Attempt[] };
+    expect(attempts.items[0]?.parse?.expiry?.status).toBe('expired');
+
+    const withDate = (await list('?hasDate=true')).json() as { items: { id: string }[] };
+    expect(withDate.items.map((row) => row.id)).toEqual([imageId]);
+  });
+
+  it('refuses a boolean filter that is not true or false', async () => {
+    // Not silently coerced: every non-empty string is truthy in JavaScript, and a filter that reads
+    // "no" as "yes" would make the grid disagree with the database without saying so.
+    expect((await list('?hasAttempts=yes')).statusCode).toBe(400);
+  });
+});
+
+describe('query plans', () => {
+  /** The plan for the query the route runs - it is built by the same function - criterion 10. */
+  function planFor(query: Record<string, string>, cursor: ListCursor | null = null): string[] {
+    // Parsed from the string form, exactly as the query string delivers it.
+    const built = imageListQuery(handle.db, imageListQuerySchema.parse(query), cursor).toSQL();
+
+    const rows = handle.db.$client
+      .prepare(`EXPLAIN QUERY PLAN ${built.sql}`)
+      .all(...(built.params as never[])) as { detail: string }[];
+
+    return rows.map((row) => row.detail.trim());
+  }
+
+  /** A line that scans `images` without naming an index is the full table scan to look for. */
+  function fullScans(plan: string[]): string[] {
+    return plan.filter(
+      (detail) => /^SCAN (TABLE )?images\b/.test(detail) && !detail.includes('USING'),
+    );
+  }
+
+  it('reads the default listing and every single filter out of an index - criterion 10', () => {
+    const plans: { label: string; plan: string[] }[] = [
+      { label: 'default listing', plan: planFor({}) },
+      { label: 'next page', plan: planFor({}, { sortKey: 1_780_000_000_000, id: randomUUID() }) },
+      { label: 'source', plan: planFor({ source: 'camera' }) },
+      { label: 'variant', plan: planFor({ variant: 'upload' }) },
+      { label: 'captureGroupId', plan: planFor({ captureGroupId: randomUUID() }) },
+      { label: 'capturedAt range', plan: planFor({ from: '1000', to: '2000' }) },
+      { label: 'hasAttempts', plan: planFor({ hasAttempts: 'true' }) },
+      { label: 'hasDate', plan: planFor({ hasDate: 'false' }) },
+    ];
+
+    for (const { label, plan } of plans) {
+      expect(fullScans(plan), `${label}: ${plan.join(' | ')}`).toEqual([]);
+    }
+  });
+
+  it('finds the attempt rows behind hasAttempts and hasDate without scanning them', () => {
+    // The subquery is what turns these two filters from a table scan per row into an index lookup.
+    for (const plan of [planFor({ hasAttempts: 'true' }), planFor({ hasDate: 'true' })]) {
+      const attemptLines = plan.filter((detail) => detail.includes('attempts'));
+      expect(attemptLines.length, plan.join(' | ')).toBeGreaterThan(0);
+      for (const line of attemptLines) {
+        expect(line, plan.join(' | ')).toMatch(/USING (COVERING )?INDEX/);
+      }
+    }
   });
 });
 

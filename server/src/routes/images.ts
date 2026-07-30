@@ -1,7 +1,7 @@
 import { createReadStream } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { and, desc, eq, gte, lte, or, sql } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import {
   apiErrorSchema,
   imageListQuerySchema,
@@ -16,7 +16,9 @@ import type { Db } from '../db/client.js';
 import { images } from '../db/schema.js';
 import type { ImageRow } from '../db/schema.js';
 import { decodeCursor, encodeCursor } from '../lib/cursor.js';
+import type { ListCursor } from '../lib/cursor.js';
 import { imageFilePath, isImageId } from '../lib/imagePaths.js';
+import { imageListQuery } from '../lib/imageQuery.js';
 import { deriveImageMetadata, UnsupportedImageError, writeFileAtomically } from '../lib/images.js';
 import { ensureThumbnail } from '../lib/thumbnails.js';
 
@@ -201,47 +203,19 @@ export function createImageRoutes(options: ImageRoutesOptions): FastifyPluginAsy
         },
       },
       async (request, reply) => {
-        const { limit, cursor, source, variant, from, to } = request.query;
+        const { limit, cursor } = request.query;
 
-        const conditions = [];
-
+        let decoded: ListCursor | null = null;
         if (cursor !== undefined) {
-          const decoded = decodeCursor(cursor);
+          decoded = decodeCursor(cursor);
           if (decoded === null) {
             return reply.code(400).send({ error: 'bad_request', message: 'Malformed cursor' });
           }
-          // Newest first, so "after the cursor" means strictly older. `id` breaks ties, because two
-          // uploads can share a millisecond.
-          conditions.push(
-            or(
-              sql`${images.createdAt} < ${decoded.sortKey}`,
-              and(eq(images.createdAt, decoded.sortKey), sql`${images.id} < ${decoded.id}`),
-            ),
-          );
         }
 
-        if (source !== undefined) {
-          conditions.push(eq(images.source, source));
-        }
-        if (variant !== undefined) {
-          conditions.push(eq(images.variant, variant));
-        }
-        // The date range filters on when the photo was taken, not when it was stored.
-        if (from !== undefined) {
-          conditions.push(gte(images.capturedAt, from));
-        }
-        if (to !== undefined) {
-          conditions.push(lte(images.capturedAt, to));
-        }
-
-        // One row beyond the page, purely to learn whether another page exists without a count(*).
-        const rows = db
-          .select()
-          .from(images)
-          .where(conditions.length > 0 ? and(...conditions) : undefined)
-          .orderBy(desc(images.createdAt), desc(images.id))
-          .limit(limit + 1)
-          .all();
+        // Built in `lib/imageQuery.ts` so that the plan check in the tests explains this exact
+        // query rather than a lookalike - phase 06 criterion 10.
+        const rows = imageListQuery(db, request.query, decoded).all();
 
         const page = rows.slice(0, limit);
         const last = page.at(-1);

@@ -55,6 +55,13 @@ export const images = sqliteTable(
     index('images_createdAt_id_idx').on(table.createdAt, table.id),
     index('images_captureGroupId_idx').on(table.captureGroupId),
     index('images_capturedAt_idx').on(table.capturedAt),
+
+    // The Library's two equality filters, each carrying the listing's sort columns behind it so a
+    // filtered page is one range scan and not a scan plus a sort - phase 06 criterion 10. The
+    // trailing `id` matters: it is the cursor's tie-breaker, and without it SQLite would have to
+    // sort the rows that share a millisecond.
+    index('images_source_createdAt_id_idx').on(table.source, table.createdAt, table.id),
+    index('images_variant_createdAt_id_idx').on(table.variant, table.createdAt, table.id),
   ],
 );
 
@@ -165,7 +172,13 @@ export const attempts = sqliteTable(
   },
   (table) => [
     index('attempts_imageId_createdAt_idx').on(table.imageId, table.createdAt),
-    index('attempts_captureGroupId_idx').on(table.captureGroupId),
+    // Both of the Library's "has this been run?" filters, which ask about a capture group rather
+    // than a single row because attempts hang off the group's uploaded row whichever variant was
+    // read - ADR-20. `expiryDate` trails `captureGroupId` so `hasDate` is answered out of the index
+    // without touching the table. It replaces the plain `captureGroupId` index, whose every query
+    // this one serves as a prefix - a second index on the same leading column would only add write
+    // cost.
+    index('attempts_captureGroupId_expiryDate_idx').on(table.captureGroupId, table.expiryDate),
     // The grouping key of every comparison the harness exists to make.
     index('attempts_method_inputVariant_idx').on(table.method, table.inputVariant),
     // Phase 06's "has a date" filter and phase 10's median-latency queries.
