@@ -63,16 +63,21 @@ each one. Phase 07 precedes 08 and 09 because it introduces the `OcrEngine` inte
 | [03](03-app-shell.md) | App shell: dev build, navigation, Home | complete | Dev build on device, health indicator |
 | [04](04-barcode.md) | Barcode scan screen | complete | Live decode + recorded latency |
 | [05](05-capture-mlkit.md) | Expiry capture, on-device OCR, date parser | complete | Capture, two variants, parser tests |
-| [06](06-library.md) | Image library | built · app criteria unverified | Grid, filters, additive re-runs |
+| [06](06-library.md) | Image library | complete | Grid, filters, additive re-runs |
 | [07](07-ocr-sidecar.md) | Self-hosted OCR sidecar | not started | **Two stops:** spike report, then build-out |
 | [08](08-gcv.md) | Google Cloud Vision engine | not started | GCV over existing library images |
 | [09](09-vlm.md) | VLM engine | not started | Model answer vs parser answer, provider swap |
 | [10](10-history.md) | History and JSON export | not started | The POC's actual deliverable |
 
-Phase 06 is written and its server-side criteria (2, 3, 9, 10) are covered by tests. The five that need
-a handset — the grid over a real dataset, the access log during a scroll, the detail view, two rows from
-two runs, and a re-run's `null` capture segments — are **not** verified: no device was attached when it
-was built. They are the first thing to check at its review.
+Phase 06's server-side criteria (2, 3, 9, 10) are covered by tests. The rest were verified on an SM-S928B
+(Android 16) on 2026-07-30, against a local server seeded with 121 images: the grid reached the end of the
+set with **79 `/thumb` requests and not one full-resolution fetch**, the detail view showed every capture
+field, two runs produced two rows under one group with a median across them, `upload` and `original` stayed
+in separate groups, and a re-run rendered `Capture`/`Downscale`/`Upload` as `n/a` with `Download 24.3 ms`,
+its segments accounting for `Total 99.7 ms` to within 2.7 ms. Criterion 7's "a failure in one method does
+not prevent the others" is only partly exercised while `mlkit` is the sole available method; phase 07 is
+the first that can show it. That session also found the `<Image>` header bug now recorded in
+[ADR-14](../decisions.md#adr-14--shared-package-build-and-thumbnail-authentication).
 
 ## Global constraints
 

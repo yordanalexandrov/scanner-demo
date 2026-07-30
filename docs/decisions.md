@@ -29,7 +29,7 @@ had to resolve to be executable. One record per decision.
 | [11](#adr-11--cost-estimates-come-from-a-versioned-price-table) | Versioned price table with `pricingVersion` | Proposed | 01, 08, 09 |
 | [12](#adr-12--the-self-hosted-engine-defaults-to-chineseenglish-models) | Self-hosted engine defaults to ch+en models | Provisional | 07 |
 | [13](#adr-13--idea-is-gitignored) | `.idea/` is gitignored | Accepted | 01 |
-| [14](#adr-14--shared-package-build-and-thumbnail-authentication) | Shared package build; thumbnail auth | Proposed | 01, 06 |
+| [14](#adr-14--shared-package-build-and-thumbnail-authentication) | Shared package build; thumbnail auth | Accepted | 01, 06 |
 | [15](#adr-15--the-app-is-the-sole-author-of-attempt-rows) | The app is the sole author of attempt rows | **Deviation** | 05–10 |
 | [16](#adr-16--separators-and-year-widths-are-normalised-before-matching) | Separators and year widths normalised before matching | Proposed | 05 |
 | [17](#adr-17--nginx-and-certbot-instead-of-caddy) | nginx + certbot instead of Caddy | **Deviation** | 02 |
@@ -524,7 +524,25 @@ model is "the repository is public"; a header on an already-authenticated client
 orders it first. If header-authenticated images prove unreliable in the RN image pipeline, the fallback is
 a short-lived signed URL — a change confined to one server route and one client helper.
 
-**Status.** Proposed.
+**The fallback was not needed, but the mechanism has one trap.** Verified on a device in phase 06:
+React Native 0.86's `Image.android.js` lifts `headers` into the native prop **only in its array branch**.
+
+```js
+if (Array.isArray(source_)) {
+  const {headers: sourceHeaders, ...} = source_[0];
+  if (sourceHeaders != null) nativeProps.headers = sourceHeaders;
+} else {
+  const {uri, width, height} = source_;   // headers is never read
+```
+
+Passed as a plain `{ uri, headers }` object the headers are dropped with no warning, Fresco requests the
+image unauthenticated, the server answers 401, and the image pipeline renders a **blank tile** rather than
+an error — a failure that looks like a styling problem. Measured before the fix: 12 thumbnail requests,
+all 401. Every authenticated image source therefore goes through the helpers in `app/src/api/images.ts`,
+which return the one-element array form, and the reason is commented there so it is not "simplified" back.
+
+**Status.** Accepted 2026-07-30 — header authentication is verified working on the device, so the signed-URL
+fallback stays unused.
 
 ---
 

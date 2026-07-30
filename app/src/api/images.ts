@@ -86,13 +86,30 @@ export function fetchImages(
 }
 
 /**
- * A stored image, as a React Native `<Image>` source.
+ * An authenticated `<Image>` source.
  *
  * The token travels in a header rather than in the URL - ADR-14. Every route but `/health` requires
  * it, so an `<Image>` pointed at a bare URL renders as a silent 401 and an empty box.
+ *
+ * **The one-element array is load-bearing, not a style.** React Native 0.86's `Image.android.js`
+ * lifts `headers` into the native prop only in its array branch:
+ *
+ * ```js
+ * if (Array.isArray(source_)) {
+ *   const {headers: sourceHeaders, ...} = source_[0];
+ *   if (sourceHeaders != null) nativeProps.headers = sourceHeaders;
+ * } else {
+ *   const {uri, width, height} = source_;   // headers is never read
+ * ```
+ *
+ * Passed as a plain object the headers are dropped without a warning, Fresco requests the image
+ * unauthenticated, and the server answers 401 - which the image pipeline renders as a blank tile
+ * rather than as an error. Verified on the device: 12 thumbnail requests, all 401, before this shape.
  */
-export function imageSourceFor(id: string): { uri: string; headers: Record<string, string> } {
-  return { uri: apiUrl(`/api/v1/images/${encodeURIComponent(id)}`), headers: authHeaders() };
+type AuthenticatedImageSource = [{ uri: string; headers: Record<string, string> }];
+
+export function imageSourceFor(id: string): AuthenticatedImageSource {
+  return [{ uri: apiUrl(`/api/v1/images/${encodeURIComponent(id)}`), headers: authHeaders() }];
 }
 
 /**
@@ -102,11 +119,10 @@ export function imageSourceFor(id: string): { uri: string; headers: Record<strin
  * a phone's uplink to draw squares 110px wide, and phase 06 criterion 1 checks the access log for
  * exactly that.
  */
-export function thumbnailSourceFor(id: string): { uri: string; headers: Record<string, string> } {
-  return {
-    uri: apiUrl(`/api/v1/images/${encodeURIComponent(id)}/thumb`),
-    headers: authHeaders(),
-  };
+export function thumbnailSourceFor(id: string): AuthenticatedImageSource {
+  return [
+    { uri: apiUrl(`/api/v1/images/${encodeURIComponent(id)}/thumb`), headers: authHeaders() },
+  ];
 }
 
 /**
