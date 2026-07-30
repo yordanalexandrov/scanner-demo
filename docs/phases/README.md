@@ -225,6 +225,6 @@ Not blocking this plan, but blocking the phases they belong to.
 
 | Question | Blocks | Status |
 |---|---|---|
-| `scanner.yo-po.eu` must resolve to `167.235.146.155` before certbot can issue a certificate — an `A` record at the registrar. | [02](02-server-images.md) | **open** |
-| Local `expo run:android` (needs the Android SDK here) or EAS cloud builds (needs an Expo account)? No device is currently attached. | [03](03-app-shell.md) | **open** |
+| `scanner.yo-po.eu` must resolve to `167.235.146.155` before certbot can issue a certificate — an `A` record at the registrar. | [02](02-server-images.md) | resolved 2026-07-30 — the record is in place and the vhost serves over TLS |
+| Local `expo run:android` (needs the Android SDK here) or EAS cloud builds (needs an Expo account)? | [03](03-app-shell.md) | resolved 2026-07-30 — local `expo run:android` against an attached device |
 | SSH access to the deployment box, and who deploys. | [02](02-server-images.md) | resolved 2026-07-28 — see [deployment-target.md](../deployment-target.md) |
