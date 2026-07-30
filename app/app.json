@@ -16,7 +16,9 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "//blockedPermissions": "expo-audio and expo-image-picker each add RECORD_AUDIO through their config plugins, for recording and for video picking. This app plays one 70 ms beep and imports still images; it opens no microphone. Their own options did not remove it, so it is blocked here, which is the lever that applies last.",
+      "blockedPermissions": ["android.permission.RECORD_AUDIO"]
     },
     "plugins": [
       "expo-dev-client",
@@ -26,6 +28,22 @@
           "cameraPermissionText": "scanner-demo needs the camera to scan barcodes and photograph expiry dates.",
           "enableFrameProcessors": false,
           "enableCodeScanner": true
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "scanner-demo imports packaging photographs from your library into the benchmark dataset.",
+          "//": "microphonePermission is off because this app imports still images and never picks video. cameraPermission is deliberately NOT set to false: that adds CAMERA to blockedPermissions, which would strip the permission vision-camera needs.",
+          "microphonePermission": false
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "//": "The app plays a 70 ms beep on a barcode hit and records nothing. The plugin adds RECORD_AUDIO by default; an APK from a public repository must not ask for a microphone it never opens.",
+          "recordAudioAndroid": false,
+          "enableBackgroundPlayback": false
         }
       ]
     ]
