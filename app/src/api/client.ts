@@ -54,8 +54,26 @@ export class ApiError extends Error {
   }
 }
 
-function url(path: string): string {
+/**
+ * The absolute URL of an API path.
+ *
+ * Exported because two things need a URL rather than a parsed response: an `<Image>` source and a
+ * file download. Both still go through {@link authHeaders}, so there is one place a request can
+ * acquire the token.
+ */
+export function apiUrl(path: string): string {
   return `${config.serverUrl}${path.startsWith('/') ? path : `/${path}`}`;
+}
+
+/**
+ * The bearer token, as a header.
+ *
+ * Image and thumbnail requests authenticate this way rather than through signed URLs: the entire
+ * threat model here is "the repository is public", and a token-minting endpoint with an expiry
+ * policy would be machinery in service of nothing - ADR-14.
+ */
+export function authHeaders(): Record<string, string> {
+  return { Authorization: `Bearer ${config.apiToken}` };
 }
 
 /**
@@ -130,13 +148,13 @@ async function request<T>(
 
   let response: Response;
   try {
-    response = await fetch(url(path), {
+    response = await fetch(apiUrl(path), {
       ...init,
       signal,
       headers: {
         // Sent on /health too, which does not require it. One code path is worth more than the
         // handful of bytes saved by special-casing the only unauthenticated route.
-        Authorization: `Bearer ${config.apiToken}`,
+        ...authHeaders(),
         Accept: 'application/json',
         ...init.headers,
       },
@@ -231,17 +249,14 @@ export async function apiUploadFile<T>(
   let result: UploadResult;
 
   try {
-    result = await file.upload(url(path), {
+    result = await file.upload(apiUrl(path), {
       httpMethod: 'POST',
       uploadType: UploadType.MULTIPART,
       // The server expects exactly these two parts and rejects any other field name.
       fieldName: 'file',
       mimeType: options.mimeType ?? 'image/jpeg',
       parameters: parts,
-      headers: {
-        Authorization: `Bearer ${config.apiToken}`,
-        Accept: 'application/json',
-      },
+      headers: { ...authHeaders(), Accept: 'application/json' },
     });
   } catch (error: unknown) {
     throw new ApiError(error instanceof Error ? error.message : 'The upload failed', {
@@ -277,6 +292,37 @@ export async function apiUploadFile<T>(
   }
 
   return parsed.data;
+}
+
+/**
+ * Streams a stored file onto the phone. The other direction of {@link apiUploadFile}.
+ *
+ * It exists because a Library re-run has to read the very bytes the server holds - anything else
+ * would benchmark a different image from the one the row names. The download is a measured segment
+ * of its own, `timing.downloadMs`, and is never folded into `uploadMs`: one is the phone sending a
+ * capture and the other is the phone fetching an archive, and adding them together would describe a
+ * round trip that never happened - ADR-10.
+ *
+ * A non-2xx status arrives as a rejection whose message carries the code, so a 401 on the image
+ * route surfaces as a failed re-run rather than as a zero-byte file that ML Kit then reads as
+ * "no text found".
+ */
+export async function apiDownloadFile(path: string, destination: File): Promise<File> {
+  try {
+    return await File.downloadFileAsync(apiUrl(path), destination, {
+      headers: authHeaders(),
+      // The destination is named after the image ID, so the same variant downloaded twice is the
+      // same file. Overwriting is the intended behaviour; failing on the second run is not.
+      idempotent: true,
+    });
+  } catch (error: unknown) {
+    throw new ApiError(error instanceof Error ? error.message : 'The download failed', {
+      // The native module reports the HTTP status inside the message rather than as a field, so
+      // this stays 'network' rather than claiming a status it would have to guess at.
+      kind: 'network',
+      cause: error,
+    });
+  }
 }
 
 function safeJson(body: string): unknown {
