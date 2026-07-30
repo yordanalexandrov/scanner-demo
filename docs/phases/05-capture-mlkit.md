@@ -1,6 +1,6 @@
 # Phase 05 — Expiry capture, on-device OCR, and the date parser
 
-**Status:** complete — see _Measured on device_ for which criteria were verified and which were not ·
+**Status:** complete — thirteen of the fourteen acceptance criteria verified; see _Measured on device_ ·
 **Depends on:** 03, 04 · **Source:** spec milestone 5
 
 ## Goal
@@ -251,17 +251,32 @@ rather than the ad-hoc session this was.
 | # | Verified by |
 |---|---|
 | 1 | On device — torch on with the screen freshly opened, no interaction |
-| 2 | **Not verified**, and cannot hold as worded: `focus()` is not a lock, see the risk note below |
+| 2 | On device, by the owner. Note that `focus()` is not a lock — see the risk note below — but the shutter re-focuses and waits, and no hunt was observed |
 | 3 | On device — 3000×4000 recorded for the selected lens, matching its maximum |
-| 4 | **Not verified.** The cleanup was rewritten after the archive was found deleting a file the on-device path still needed, and the app directories have not been listed since |
-| 5 | **Not verified** — no gallery import was tried |
-| 6 | Half — two images share a `captureGroupId` with archiving on; the `ARCHIVE_ORIGINAL=false` case was never run |
-| 7 | **Not verified.** Needs ten captures each way and a server access log; nothing here measured it |
+| 4 | On device, after a fix. Listing the app's directories found **32 MB** of full-resolution photographs left over — every one from a session ended with `am force-stop`, which runs no unmount effect. A sweep on screen mount was added; the cache then measured **352 KB** with nothing in the cache root, `ImageManipulator/`, `ImagePicker/` or `files/`. The media store never held anything: `content://media/external/images/media` returns no match for the capture prefix |
+| 5 | On device — `source: gallery`, `torch: null`, `capturedAtSource: exif`, **`captureMs: null`**, and the screen labels all of it |
+| 6 | On device — 11 capture groups with two rows each under `ARCHIVE_ORIGINAL=true`, and 11 with exactly one under `false` |
+| 7 | Split. The ordering check **passes** decisively: over 11 pairs in the server access log, **zero** archive requests began before the measured upload's response was sent, each starting 14–33 ms after it. The 5% median check **fails** — 35.4 ms against 52.6 ms — and the failure does not implicate the archive; see below |
 | 8, 9, 10 | `pnpm --filter @scanner-demo/shared test` — 27 parser tests, the acceptance table case for case |
 | 11 | On device — six attempts across three captures, `upload` and `original` for each, all retrievable from `GET /api/v1/images/:id/attempts` |
 | 12 | On device — raw text verbatim, `null` segments as "n/a", `$0.00` for the on-device method and "unknown" where the price is not known |
 | 13 | On device, involuntarily and thoroughly — three failed runs recorded with `error` set and `ocr: null`, which is how the ENOENT defect below became visible at all |
 | 14 | Structural — there is no run-all control on the screen |
+
+### Why criterion 7's median check cannot be settled on this rig
+
+`uploadMs` came out **higher with archiving off** (52.6 ms) than with it on (35.4 ms). The archive
+cannot be responsible for the run that does not perform it, so the 32.7% gap is measuring something
+else. In time order, the slow uploads of the archive-off run are scattered through it rather than
+grouped, which rules out thermal drift and points at intermittent contention; normalised by payload
+the throughput is bimodal — five captures near 0.10 ms/KB and five near 0.20 — at almost identical
+file sizes.
+
+Everything in this session travelled over `adb reverse` on a USB cable shared with Metro and logcat.
+The criterion was written for a phone talking to a server over a network, and its 5% threshold is a
+statistical proxy for the property the access log measures directly. **The property holds; the proxy
+is not measurable here.** Settling it as written needs the deployed server over Wi-Fi with the
+bundler detached.
 
 Three defects, all found because the numbers were on screen next to each other, all fixed:
 

@@ -27,6 +27,7 @@ import {
   discard,
   parseExifCapturedAt,
   storeCapture,
+  sweepStaleCaptures,
   type CaptureSource,
   type StoredCapture,
 } from '../lib/capture';
@@ -328,15 +329,21 @@ export function CaptureScreen() {
     setStage('framing');
   }, [stored]);
 
-  // Criterion 4: no full-size photo may survive the flow. `reset` covers "capture another"; this
-  // covers walking away from the screen, which is the more likely of the two.
-  useEffect(
-    () => () => {
+  /**
+   * Criterion 4: no full-size photo may survive the flow.
+   *
+   * Three moments, because one is not enough. `reset` covers "capture another", the teardown below
+   * covers walking away from the screen, and the sweep on the way in covers the case neither can -
+   * a process killed before any of them ran.
+   */
+  useEffect(() => {
+    sweepStaleCaptures();
+
+    return () => {
       discard(storedRef.current?.upload.uri);
       discard(storedRef.current?.original?.uri);
-    },
-    [],
-  );
+    };
+  }, []);
 
   if (!permission.granted) {
     return (

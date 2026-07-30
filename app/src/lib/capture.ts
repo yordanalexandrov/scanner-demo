@@ -1,4 +1,4 @@
-import { File } from 'expo-file-system';
+import { Directory, File, Paths } from 'expo-file-system';
 import { randomUUID } from 'expo-crypto';
 import { measureAsync } from '@scanner-demo/shared';
 import type { CapturedAtSource, ImageSource, Millis } from '@scanner-demo/shared';
@@ -69,6 +69,48 @@ export function discard(uri: string | null | undefined): void {
   } catch {
     // Nothing actionable: the file is in the cache directory either way, and reporting a failed
     // cleanup as a capture failure would lose a measurement over a temporary file.
+  }
+}
+
+/**
+ * Directories the capture flow leaves scratch files in. `takePhoto` writes into the cache root with
+ * a library-specific prefix; the manipulator and the picker each own a subdirectory of it.
+ */
+const CAPTURE_TEMP_PREFIX = 'mrousavy';
+const CAPTURE_TEMP_DIRS = ['ImageManipulator', 'ImagePicker'];
+
+/**
+ * Deletes scratch files left behind by earlier flows.
+ *
+ * `discard` covers the normal path, but it runs from JavaScript, and a process that is killed - by
+ * the system, by a crash, or by `adb shell am force-stop` during development - runs no unmount
+ * effect at all. Verifying acceptance criterion 4 found 32 MB of full-resolution photographs in the
+ * cache from exactly those sessions, so a cleanup that only ever runs on the way out is not enough.
+ *
+ * Called when the capture screen mounts, which is the one moment that is provably safe: nothing is
+ * in flight yet, so every file matching these patterns belongs to a flow that has already ended.
+ */
+export function sweepStaleCaptures(): void {
+  try {
+    for (const entry of Paths.cache.list()) {
+      if (entry instanceof File && entry.name.startsWith(CAPTURE_TEMP_PREFIX)) {
+        discard(entry.uri);
+      }
+    }
+
+    for (const name of CAPTURE_TEMP_DIRS) {
+      const directory = new Directory(Paths.cache, name);
+      if (!directory.exists) {
+        continue;
+      }
+      for (const entry of directory.list()) {
+        if (entry instanceof File) {
+          discard(entry.uri);
+        }
+      }
+    }
+  } catch {
+    // A cache the app cannot enumerate is not a reason to refuse to take photographs.
   }
 }
 
