@@ -385,6 +385,11 @@ export function CaptureScreen() {
             source={{ uri: previewUri }}
             style={StyleSheet.absoluteFill}
             resizeMode="contain"
+            // Reported rather than swallowed: a frozen frame that silently fails to load leaves the
+            // operator looking at a live preview and believing it is the shot they took.
+            onError={({ nativeEvent }) =>
+              setError(`Could not show the captured frame: ${nativeEvent.error}`)
+            }
           />
         )}
 
