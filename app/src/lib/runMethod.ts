@@ -76,7 +76,10 @@ function toMessage(failure: unknown, fallback: string): string {
 export async function runMlKit(input: RunMethodInput): Promise<RunMethodResult> {
   let ocr: OcrResponse | null = null;
   let parse: ParseResult | null = null;
-  let parseMs: Millis = 0;
+  // `null` until the parser actually runs. A recognition that threw leaves nothing to parse, and
+  // recording `0 ms` there would put a parse that never happened into every parse-time average -
+  // ADR-10, and the global rule that a null measurement is null and never zero.
+  let parseMs: Millis | null = null;
   let error: string | null = null;
 
   try {
