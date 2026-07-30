@@ -62,7 +62,7 @@ each one. Phase 07 precedes 08 and 09 because it introduces the `OcrEngine` inte
 | [02](02-server-images.md) | Server: image store, health, deployment | complete | Upload/serve/thumb over TLS |
 | [03](03-app-shell.md) | App shell: dev build, navigation, Home | complete | Dev build on device, health indicator |
 | [04](04-barcode.md) | Barcode scan screen | complete | Live decode + recorded latency |
-| [05](05-capture-mlkit.md) | Expiry capture, on-device OCR, date parser | in review | Capture, two variants, parser tests |
+| [05](05-capture-mlkit.md) | Expiry capture, on-device OCR, date parser | complete | Capture, two variants, parser tests |
 | [06](06-library.md) | Image library | not started | Grid, filters, additive re-runs |
 | [07](07-ocr-sidecar.md) | Self-hosted OCR sidecar | not started | **Two stops:** spike report, then build-out |
 | [08](08-gcv.md) | Google Cloud Vision engine | not started | GCV over existing library images |

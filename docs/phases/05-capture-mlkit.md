@@ -1,7 +1,7 @@
 # Phase 05 — Expiry capture, on-device OCR, and the date parser
 
-**Status:** in review — code complete, **nothing run on a device yet** · **Depends on:** 03, 04 ·
-**Source:** spec milestone 5
+**Status:** complete — see _Measured on device_ for which criteria were verified and which were not ·
+**Depends on:** 03, 04 · **Source:** spec milestone 5
 
 ## Goal
 
@@ -243,6 +243,25 @@ anchor was unreadable. That is [ADR-4](../decisions.md#adr-4--bbox-is-nullable-a
 fallback working on real packaging, and it is why `rule` is recorded on every attempt: on Bulgarian
 packaging the on-device path will almost never get to use the anchor rule, and any accuracy comparison
 that does not split by `rule` will be comparing different decision paths.
+
+Where each acceptance criterion stands. The phase was accepted with several unverified, which is a
+decision on record rather than an oversight — they are the ones needing a deliberate ten-capture run
+rather than the ad-hoc session this was.
+
+| # | Verified by |
+|---|---|
+| 1 | On device — torch on with the screen freshly opened, no interaction |
+| 2 | **Not verified**, and cannot hold as worded: `focus()` is not a lock, see the risk note below |
+| 3 | On device — 3000×4000 recorded for the selected lens, matching its maximum |
+| 4 | **Not verified.** The cleanup was rewritten after the archive was found deleting a file the on-device path still needed, and the app directories have not been listed since |
+| 5 | **Not verified** — no gallery import was tried |
+| 6 | Half — two images share a `captureGroupId` with archiving on; the `ARCHIVE_ORIGINAL=false` case was never run |
+| 7 | **Not verified.** Needs ten captures each way and a server access log; nothing here measured it |
+| 8, 9, 10 | `pnpm --filter @scanner-demo/shared test` — 27 parser tests, the acceptance table case for case |
+| 11 | On device — six attempts across three captures, `upload` and `original` for each, all retrievable from `GET /api/v1/images/:id/attempts` |
+| 12 | On device — raw text verbatim, `null` segments as "n/a", `$0.00` for the on-device method and "unknown" where the price is not known |
+| 13 | On device, involuntarily and thoroughly — three failed runs recorded with `error` set and `ocr: null`, which is how the ENOENT defect below became visible at all |
+| 14 | Structural — there is no run-all control on the screen |
 
 Three defects, all found because the numbers were on screen next to each other, all fixed:
 
