@@ -35,7 +35,7 @@ had to resolve to be executable. One record per decision.
 | [17](#adr-17--nginx-and-certbot-instead-of-caddy) | nginx + certbot instead of Caddy | **Deviation** | 02 |
 | [18](#adr-18--the-benchmark-shares-the-box-with-production) | The benchmark shares the box with production | Accepted | 02, 07, 10 |
 | [19](#adr-19--vision-camera-is-pinned-to-v4-and-the-android-project-is-generated) | vision-camera pinned to v4; Android project generated, not committed | Accepted | 03, 04, 05 |
-| [20](#adr-20--a-capture-group-has-one-anchor-row-and-the-librarys-filters-read-the-group) | One anchor row per capture group; group-scoped Library filters | Proposed | 06, 10 |
+| [20](#adr-20--a-capture-group-has-one-anchor-row-and-the-librarys-filters-read-the-group) | One anchor row per capture group; group-scoped Library filters | Accepted | 06, 10 |
 
 **Rule names, not rule numbers.** The specification numbers its disambiguation rules 1–4;
 [ADR-6](#adr-6--parser-rule-order-and-referencedate) inserts extraction as a step and renumbers them. To
@@ -774,4 +774,7 @@ server test asserting it names this ADR. If the per-row reading is what was want
 withdrawn — but then the `variant=original` view of the Library has no usable "not yet run" filter, and
 `attempts.captureGroupId` loses the reason it was denormalised in the first place.
 
-**Status.** Proposed.
+**Status.** Accepted 2026-07-30, together with the narrowing of phase 06's acceptance criterion 3 that
+it entails. The per-row alternative was put alongside it and rejected: it either splits a
+`(method, inputVariant)` group's medians across two rows, or forces the attempts endpoint to be keyed by
+capture group instead — which is this decision reached by a longer route.
