@@ -5,7 +5,6 @@
  * makes the comparison between the four extraction methods valid: an accuracy difference has to
  * come from the OCR, because nothing downstream of it differs.
  *
- * The date parser joins this package in phase 05.
  */
 
 export * from './schemas/ocr.js';
@@ -18,6 +17,7 @@ export * from './schemas/parse.js';
 export * from './data/anchors.js';
 export * from './data/months.js';
 
+export * from './dateParser.js';
 export * from './timing.js';
 export * from './stats.js';
 export * from './pricing.js';

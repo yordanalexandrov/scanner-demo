@@ -21,6 +21,21 @@ const configSchema = z.object({
     .transform((value) => value.replace(/\/+$/, ''))
     .pipe(z.url({ message: 'EXPO_PUBLIC_SERVER_URL must be an absolute http(s) URL' })),
   apiToken: z.string().min(1, 'EXPO_PUBLIC_API_TOKEN is required'),
+
+  /**
+   * The downscale the specification calls the single largest end-to-end latency win, kept
+   * configurable so the trade-off against accuracy can be measured rather than assumed. Both values
+   * are recorded on every attempt through the stored image's dimensions, so a change here is
+   * visible in the data instead of silently splitting the dataset.
+   */
+  downscaleLongEdge: z.coerce.number().int().min(64).max(8000).default(1600),
+  downscaleQuality: z.coerce.number().int().min(1).max(100).default(80),
+
+  /** Background archive of the full-resolution original - ADR-3. Off means one variant, not two. */
+  archiveOriginal: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((value) => value === 'true'),
 });
 
 export type AppConfig = z.infer<typeof configSchema>;
@@ -29,6 +44,9 @@ function loadConfig(): AppConfig {
   const parsed = configSchema.safeParse({
     serverUrl: process.env.EXPO_PUBLIC_SERVER_URL,
     apiToken: process.env.EXPO_PUBLIC_API_TOKEN,
+    downscaleLongEdge: process.env.EXPO_PUBLIC_DOWNSCALE_LONG_EDGE,
+    downscaleQuality: process.env.EXPO_PUBLIC_DOWNSCALE_QUALITY,
+    archiveOriginal: process.env.EXPO_PUBLIC_ARCHIVE_ORIGINAL,
   });
 
   if (!parsed.success) {

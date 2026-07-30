@@ -5,7 +5,14 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import sharp from 'sharp';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { BarcodeScan, BarcodeScanCreate, ImageUploadMeta } from '@scanner-demo/shared';
+import { parseExpiryDate } from '@scanner-demo/shared';
+import type {
+  Attempt,
+  AttemptCreate,
+  BarcodeScan,
+  BarcodeScanCreate,
+  ImageUploadMeta,
+} from '@scanner-demo/shared';
 import { buildServer } from './app.js';
 import { openDatabase } from './db/client.js';
 import type { DbHandle } from './db/client.js';
@@ -171,6 +178,7 @@ describe('authentication', () => {
     ['/api/v1/images', 'POST'],
     ['/api/v1/barcode-scans', 'GET'],
     ['/api/v1/barcode-scans', 'POST'],
+    ['/api/v1/attempts', 'POST'],
   ])('refuses %s %s without a token', async (url, method) => {
     const response = await app.inject({ method: method as 'GET' | 'POST', url });
 
@@ -574,6 +582,170 @@ describe('barcode scans', () => {
       method: 'GET',
       url: '/api/v1/barcode-scans?cursor=not-a-cursor',
       headers: { authorization: `Bearer ${TOKEN}` },
+    });
+
+    expect(response.statusCode).toBe(400);
+  });
+});
+
+describe('attempts', () => {
+  /** A minimal on-device attempt. Overrides let each test change only what it is about. */
+  function attemptBody(imageId: string, overrides: Partial<AttemptCreate> = {}): AttemptCreate {
+    return {
+      imageId,
+      captureGroupId: randomUUID(),
+      method: 'mlkit',
+      inputVariant: 'upload',
+      device: 'Pixel Test (Android 15)',
+      ocr: {
+        engine: 'mlkit',
+        rawText: 'EXP 12.03.2027',
+        blocks: [{ text: 'EXP 12.03.2027', bbox: [10, 20, 200, 40], confidence: null }],
+        engineMs: 84.2,
+        engineMsScope: 'inference',
+        serverTotalMs: null,
+        imageWidth: 1600,
+        imageHeight: 1200,
+        usage: null,
+        costEstimateUsd: 0,
+        pricingVersion: 'unset',
+      },
+      parse: parseExpiryDate(
+        [{ text: 'EXP 12.03.2027', bbox: [10, 20, 200, 40], confidence: null }],
+        { referenceDate: new Date(Date.UTC(2025, 5, 1)) },
+      ),
+      vlm: null,
+      timing: {
+        captureMs: 210.5,
+        downscaleMs: 44.1,
+        uploadMs: 512.9,
+        downloadMs: null,
+        requestMs: null,
+        engineMs: null,
+        serverTotalMs: null,
+        parseMs: 1.4,
+        totalMs: 852.6,
+      },
+      referenceDate: '2025-06-01',
+      pricingVersion: 'unset',
+      promptVersion: null,
+      error: null,
+      ...overrides,
+    };
+  }
+
+  async function postAttempt(
+    imageId: string,
+    overrides: Partial<AttemptCreate> = {},
+  ): Promise<{ statusCode: number; id: string }> {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/attempts',
+      headers: { authorization: `Bearer ${TOKEN}` },
+      payload: attemptBody(imageId, overrides),
+    });
+
+    return {
+      statusCode: response.statusCode,
+      id: response.statusCode === 201 ? (response.json() as { id: string }).id : '',
+    };
+  }
+
+  function listAttempts(imageId: string) {
+    return app.inject({
+      method: 'GET',
+      url: `/api/v1/images/${imageId}/attempts`,
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
+  }
+
+  it('round-trips a record through the JSON payload, not through the flat columns', async () => {
+    const { imageId } = await upload(await testImage(320, 240));
+    const created = await postAttempt(imageId);
+
+    expect(created.statusCode).toBe(201);
+
+    const listed = await listAttempts(imageId);
+    const items = (listed.json() as { items: Attempt[] }).items;
+
+    expect(items).toHaveLength(1);
+    const attempt = items[0];
+    expect(attempt?.id).toBe(created.id);
+    expect(attempt?.ocr?.rawText).toBe('EXP 12.03.2027');
+    // The parser's own answer survives the round trip intact, signals and candidates included.
+    expect(attempt?.parse?.expiry?.date).toBe('2027-03-12');
+    // The anchor and the date share a block, so the anchor sits at distance zero from the
+    // candidate and decides. That is the intended reading of "nearest an anchor" - ADR-6.
+    expect(attempt?.parse?.rule).toBe('anchor-proximity');
+    expect(attempt?.parse?.confidence.signals.length).toBeGreaterThan(0);
+    // A null segment stays null. Rendering it as 0 would corrupt every average built on it.
+    expect(attempt?.timing.requestMs).toBeNull();
+    expect(attempt?.timing.totalMs).toBe(852.6);
+  });
+
+  it('records two on-device attempts for one capture, one per variant - ADR-2', async () => {
+    const captureGroupId = randomUUID();
+    const { imageId } = await upload(await testImage(320, 240), { captureGroupId });
+
+    await postAttempt(imageId, { captureGroupId, inputVariant: 'upload' });
+    await postAttempt(imageId, { captureGroupId, inputVariant: 'original' });
+
+    const items = (await listAttempts(imageId)).json() as { items: Attempt[] };
+
+    expect(items.items).toHaveLength(2);
+    // (method, inputVariant) is the grouping key; method alone would average the two together.
+    expect(items.items.map((row) => row.inputVariant).sort()).toEqual(['original', 'upload']);
+  });
+
+  it('appends on a re-run rather than overwriting - ADR-15', async () => {
+    const { imageId } = await upload(await testImage(320, 240));
+
+    const first = await postAttempt(imageId);
+    const second = await postAttempt(imageId);
+
+    const items = (await listAttempts(imageId)).json() as { items: Attempt[] };
+
+    expect(items.items).toHaveLength(2);
+    expect(new Set(items.items.map((row) => row.id))).toEqual(new Set([first.id, second.id]));
+  });
+
+  it('stores a failed run as a row rather than as a gap - criterion 13', async () => {
+    const { imageId } = await upload(await testImage(320, 240));
+
+    const created = await postAttempt(imageId, {
+      ocr: null,
+      parse: null,
+      error: 'ML Kit returned no result',
+    });
+
+    expect(created.statusCode).toBe(201);
+
+    const items = (await listAttempts(imageId)).json() as { items: Attempt[] };
+    expect(items.items[0]?.error).toBe('ML Kit returned no result');
+    expect(items.items[0]?.ocr).toBeNull();
+    expect(items.items[0]?.parse).toBeNull();
+  });
+
+  it('refuses an attempt against an image that does not exist', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/attempts',
+      headers: { authorization: `Bearer ${TOKEN}` },
+      payload: attemptBody(randomUUID()),
+    });
+
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('refuses a payload the shared schema rejects', async () => {
+    const { imageId } = await upload(await testImage(320, 240));
+    const body = attemptBody(imageId);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/attempts',
+      headers: { authorization: `Bearer ${TOKEN}` },
+      payload: { ...body, method: 'not-a-method' },
     });
 
     expect(response.statusCode).toBe(400);

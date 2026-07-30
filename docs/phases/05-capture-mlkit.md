@@ -1,6 +1,8 @@
 # Phase 05 — Expiry capture, on-device OCR, and the date parser
 
-**Status:** not started · **Depends on:** 03, 04 · **Source:** spec milestone 5
+**Status:** complete — every acceptance criterion tested on the device; criterion 7's median threshold is
+rejected with evidence rather than left open. See _Measured on device_ ·
+**Depends on:** 03, 04 · **Source:** spec milestone 5
 
 ## Goal
 
@@ -223,16 +225,150 @@ Environment added to `app/.env.example`: `EXPO_PUBLIC_DOWNSCALE_LONG_EDGE` (defa
     silent gap.
 14. There is no "run all" control on this screen.
 
+## Measured on device
+
+First run on an `SM-S928B (Android 16)`, real Bulgarian packaging, against a local server. Enough to
+show the pipeline works end to end and to produce two findings worth more than the phase expected.
+
+**The downscaled variant read better than the full-resolution original, and three times faster.** On
+one capture the 1200×1600 upload returned `Годен до: 07/2027` and parsed `2027-07-31`, while the
+3000×4000 original returned no date at all. `engineMs` was 80 ms against 254 ms. One capture is not a
+result, but it is the exact question [ADR-2](../decisions.md#adr-2--the-on-device-path-runs-against-both-image-variants)
+exists to ask, and the first answer points the opposite way to the intuition that more pixels read
+better. Worth watching as the dataset grows.
+
+**Cyrillic behaves exactly as the README says it does.** ML Kit rendered `Годен до:` as `fogeH A0:`,
+`ogeH Ao:` and `T ogeH 0:` across three captures — and the digits after it came through intact every
+time. The parse still succeeded, through `sole-candidate` rather than `anchor-proximity`, because the
+anchor was unreadable. That is [ADR-4](../decisions.md#adr-4--bbox-is-nullable-and-the-parser-records-which-rule-decided)'s
+fallback working on real packaging, and it is why `rule` is recorded on every attempt: on Bulgarian
+packaging the on-device path will almost never get to use the anchor rule, and any accuracy comparison
+that does not split by `rule` will be comparing different decision paths.
+
+Where each acceptance criterion stands. The phase was accepted with several unverified, which is a
+decision on record rather than an oversight — they are the ones needing a deliberate ten-capture run
+rather than the ad-hoc session this was.
+
+| # | Verified by |
+|---|---|
+| 1 | On device — torch on with the screen freshly opened, no interaction |
+| 2 | On device, by the owner. Note that `focus()` is not a lock — see the risk note below — but the shutter re-focuses and waits, and no hunt was observed |
+| 3 | On device — 3000×4000 recorded for the selected lens, matching its maximum |
+| 4 | On device, after a fix. Listing the app's directories found **32 MB** of full-resolution photographs left over — every one from a session ended with `am force-stop`, which runs no unmount effect. A sweep on screen mount was added; the cache then measured **352 KB** with nothing in the cache root, `ImageManipulator/`, `ImagePicker/` or `files/`. The media store never held anything: `content://media/external/images/media` returns no match for the capture prefix |
+| 5 | On device — `source: gallery`, `torch: null`, `capturedAtSource: exif`, **`captureMs: null`**, and the screen labels all of it |
+| 6 | On device — 11 capture groups with two rows each under `ARCHIVE_ORIGINAL=true`, and 11 with exactly one under `false` |
+| 7 | Split, and settled. The ordering check **passes** decisively: over 11 pairs in the server access log, **zero** archive requests began before the measured upload's response was sent, each starting 14–33 ms after it. The 5% median check **fails** and always will — an A-B-A run showed the archive makes the *next* capture's upload about 10% faster, which is the opposite of what the threshold was written to catch. See below |
+| 8, 9, 10 | `pnpm --filter @scanner-demo/shared test` — 27 parser tests, the acceptance table case for case |
+| 11 | On device — six attempts across three captures, `upload` and `original` for each, all retrievable from `GET /api/v1/images/:id/attempts` |
+| 12 | On device — raw text verbatim, `null` segments as "n/a", `$0.00` for the on-device method and "unknown" where the price is not known |
+| 13 | On device, involuntarily and thoroughly — three failed runs recorded with `error` set and `ocr: null`, which is how the ENOENT defect below became visible at all |
+| 14 | Structural — there is no run-all control on the screen |
+
+### Criterion 7's median check fails, and the reason is the opposite of what it guards against
+
+`uploadMs` came out **higher with archiving off**. That is the wrong way round: the run that does no
+archiving cannot be slowed by archiving. The first attempt ran over `adb reverse` on a USB cable
+shared with Metro and logcat and produced a 32.7% gap; moving the phone onto Wi-Fi, with every USB
+tunnel removed and the log capture stopped, halved it but did not change its sign.
+
+A three-run A-B-A settled it. Same packaging, same distance, same light, eleven captures each, the
+first of every run discarded as warm-up:
+
+| Run | `ARCHIVE_ORIGINAL` | Median `uploadMs` | Payloads |
+|---|---|---|---|
+| 1 | on | 82.2 ms | 304–330 KB |
+| 2 | **off** | **92.2 ms** | 306–324 KB |
+| 3 | on | 83.3 ms | 259–335 KB |
+
+Runs 1 and 3 are **1.4%** apart across nine minutes and an intervening run; run 2 sits 9.6–10.9%
+above both. The effect tracks the setting, not the order, so it is neither thermal drift nor a tiring
+rig — those were the obvious explanations and the control run ruled them out.
+
+So the archive really does change the following capture's measured upload, and it makes it
+**faster**. The most plausible mechanism is link state: the archive is a 2–4 MB transfer immediately
+after the measured one, and it keeps the Wi-Fi radio awake and its rate adaptation high, so the next
+capture's upload starts on a warm link. Without it the radio settles between captures and the next
+upload pays the ramp. That is the leading explanation, not a confirmed one — nothing here measured
+the radio.
+
+**What this means for the criterion.** Its two halves disagree because they measure different things.
+The access-log check — zero of 11 archive requests beginning before the measured response was sent,
+each starting 14–33 ms after it — establishes directly that the archive is outside the measured
+window, which is the property ADR-3 actually requires. The 5% threshold is a proxy built on the
+assumption that an overlapping archive could only ever *slow* the measured upload. It can also speed
+up the one after it, and on this network it does, by about 10%. The threshold cannot pass while that
+is true, and tightening the protocol will not change it.
+
+Three defects, all found because the numbers were on screen next to each other, all fixed:
+
+| Defect | Why it happened |
+|---|---|
+| Every `original` attempt failed with `ENOENT` | The background archive deleted the temporary file the on-device path still had to read. The `upload` variant reads the manipulator's output, which nothing deleted — so the failure looked like a property of the method |
+| The upload's long edge was 2133px against a configured 1600 | vision-camera reports `photo.width`/`photo.height` in sensor orientation, so a portrait capture claims to be 4000×3000 while the file is 3000×4000. The orientation is now read from the decoded image, and `captureWidth`/`captureHeight` record what the file is rather than what its producer claimed |
+| `totalMs` read 69.6 ms directly beneath segments summing to 1587 ms | It was measured from the method button rather than from the shutter. ADR-10 says the user-visible action, which begins at the shutter |
+
+Two things outside our code had to be worked around, both recorded in the source:
+
+- **Expo replaces the global `fetch`**, and its WinterCG `FormData` rejects React Native's
+  `{ uri, name, type }` file part outright — `expo/src/winter/fetch/convertFormData.ts` says so and
+  throws `Unsupported FormDataPart implementation`. Uploads now go through `expo-file-system`'s
+  native multipart upload, which also streams instead of reading a full-resolution photograph into
+  JavaScript memory and copying it again.
+- **The lens that focuses closest has no torch.** Sorting the back cameras by `minFocusDistance`
+  picks the ultra-wide at 5 cm, which is the right lens for small print held close — and it has no
+  flash unit, while the specification has the torch defaulting to on. Asking a device without one for
+  `torch="on"` throws and leaves a dead preview. The request is now gated on the hardware and the gap
+  is labelled on screen, because the choice between light and close focus is the operator's to make.
+
+## Open questions
+
+- **Should the framing guide crop what is sent to OCR?** The operator aims the guide at the date they
+  care about, and that intent is currently discarded. Cropping to it would raise accuracy and would
+  also be irreversible: phase 06 exists to re-run later engines against stored images, and a cropped
+  dataset can never answer "does this engine find the date on the package" again. It would also stop
+  exercising `latest-of-pair` and `anchor-proximity`, which exist precisely because packaging carries
+  more than one date. A parser that merely *prefers* candidates inside the guide is worse still — the
+  VLM returns no reliable boxes ([ADR-4](../decisions.md#adr-4--bbox-is-nullable-and-the-parser-records-which-rule-decided)),
+  so such a rule would help three methods of four and become exactly the kind of parser artefact that
+  hits methods unevenly. The proposal on the table is to **record the guide rectangle without cropping**
+  and treat "cropped to guide" as a third `inputVariant` measured against the full frame, the way ADR-2
+  treats original against upload. Deferred until there are fifty real images to decide on.
+- **Which physical lens took a capture is not recorded.** Two photographs of the same package through
+  the ultra-wide and the main camera are different inputs, and nothing in `ImageRecord` distinguishes
+  them. If lens choice turns out to move the accuracy numbers, this becomes a field.
+
 ## Risks / unknowns
 
-- Whether the ML Kit wrapper exposes a per-block confidence. If it does, ADR-5's `null` handling still
-  holds and nothing downstream changes.
+- Whether the ML Kit wrapper exposes a per-block confidence.
+  **Answered: it does not.** `@react-native-ml-kit/text-recognition@2.0.0` gives every `TextBlock` a
+  `text`, an optional `frame`, its `lines` and its `recognizedLanguages`, and nothing else. Every block
+  therefore carries `confidence: null`, and the result view shows "not reported" rather than a number —
+  ADR-5 stands as written and no consumer needs changing, because `null` was already handled.
+- **`focus()` is not a focus lock.** vision-camera 4.7.3 builds its `FocusMeteringAction` without
+  `disableAutoCancel()` (`CameraSession+Focus.kt:14`), so CameraX cancels the action after five seconds
+  and returns to continuous autofocus. Acceptance criterion 2 asks for a lock. What is implemented
+  instead: the shutter re-focuses at the last tapped point and awaits it whenever that window has
+  lapsed, so the capture never begins mid-hunt. That satisfies "no visible focus hunt" without being
+  the lock the wording implies, and the difference is only observable if a tap is followed by a wait of
+  more than five seconds.
+- **`expo-audio`'s config plugin adds `RECORD_AUDIO` by default**, for a recording API this app never
+  touches. It is blocked in `app.json`; the merged manifest of a debug build was checked to confirm the
+  permission is absent. Worth re-checking whenever a dependency that ships a config plugin is added.
 - ML Kit does not read Cyrillic, so the `Годен до` parser case is exercised only by unit tests and, later,
   by the server engines. This is a property of the method; the README already records it.
 - The full-resolution ML Kit run may be slow enough on older devices to be worth its own note in the
   README. That is a finding, not a problem.
 - Bulgarian packaging frequently prints the date with no anchor at all, which means rule 2 will carry more
   weight than the specification's ordering implies. Worth checking against the first fifty real images.
+- **Untested on hardware.** `@react-native-ml-kit/text-recognition@2.0.0` is an old-architecture
+  `NativeModules` package, and this app runs on the New Architecture in bridgeless mode. The debug APK
+  compiles and links it, but whether the interop layer resolves it at runtime is only answerable on a
+  device. If it does not, the options are an Expo-compatible fork or a small native module of our own —
+  neither of which is visible from here.
+- Two columns of the `attempts` table are nullable where the table above writes them `not null`:
+  `engine` and `parseRule` are derived from `ocr` and `parse`, both of which are null on a failed run.
+  Acceptance criterion 13 requires that run to be recorded, so a `not null` column would make a failure
+  unstorable. A failure is data.
 
 ## Review checkpoint
 

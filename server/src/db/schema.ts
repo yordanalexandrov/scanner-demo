@@ -1,5 +1,13 @@
 import { index, integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core';
-import type { CapturedAtSource, ImageSource, ImageVariant } from '@scanner-demo/shared';
+import type {
+  CapturedAtSource,
+  DatePrecision,
+  ExpiryStatus,
+  ImageSource,
+  ImageVariant,
+  Method,
+  ParseRule,
+} from '@scanner-demo/shared';
 
 /**
  * The `images` table, mirroring `imageRecordSchema` in `packages/shared` field for field.
@@ -90,3 +98,81 @@ export const barcodeScans = sqliteTable(
 
 export type BarcodeScanRow = typeof barcodeScans.$inferSelect;
 export type NewBarcodeScanRow = typeof barcodeScans.$inferInsert;
+
+/**
+ * The `attempts` table - one run of one method against one image.
+ *
+ * Hybrid on purpose. `attemptSchema` is nested several levels deep and phase 06 has to filter and
+ * aggregate on fields buried inside it, so the columns that get filtered, sorted or grouped are
+ * flattened and indexed while the full payloads stay as JSON. **The JSON is the record and the
+ * columns are its index**: every flattened column is derived from the JSON on write and none is
+ * ever edited on its own, or the two would disagree and only one of them would be right.
+ *
+ * Two columns are nullable where the phase document writes them `not null`. `engine` is read from
+ * `ocr.engine` and `parseRule` from `parse.rule`, and both of those objects are null on a failed
+ * run - which acceptance criterion 13 requires to be recorded rather than dropped. A failure is
+ * data; making these columns `not null` would make it unstorable.
+ */
+export const attempts = sqliteTable(
+  'attempts',
+  {
+    id: text('id').primaryKey(),
+
+    imageId: text('imageId')
+      .notNull()
+      .references(() => images.id),
+    /** Denormalised from the image so that the two variants of one capture group together - ADR-3. */
+    captureGroupId: text('captureGroupId').notNull(),
+
+    method: text('method').notNull().$type<Method>(),
+    /**
+     * `(method, inputVariant)` is the grouping key, never `method` alone: the on-device path runs
+     * against both variants and averaging the two together would make both numbers wrong - ADR-2.
+     */
+    inputVariant: text('inputVariant').notNull().$type<ImageVariant>(),
+
+    /** The full engine string including the model, which is also the price-table key - ADR-11. */
+    engine: text('engine'),
+    device: text('device').notNull(),
+
+    /** Derived from `parse`. `null` when nothing parsed, which the hasDate filter reads directly. */
+    expiryDate: text('expiryDate'),
+    expiryStatus: text('expiryStatus').$type<ExpiryStatus>(),
+    expiryPrecision: text('expiryPrecision').$type<DatePrecision>(),
+    parseRule: text('parseRule').$type<ParseRule>(),
+
+    /** Measured entirely on the phone, one clock - ADR-10. Indexed for the median queries. */
+    totalMs: real('totalMs').notNull(),
+    engineMs: real('engineMs'),
+    /** `null` while the price is unfilled. Never `0` - an unknown cost is not a free one - ADR-11. */
+    costEstimateUsd: real('costEstimateUsd'),
+
+    /** ISO. Stored so a re-run a year later reaches the same verdict - ADR-6. */
+    referenceDate: text('referenceDate').notNull(),
+    pricingVersion: text('pricingVersion').notNull(),
+    /** VLM only. A prompt change alters results the way a model change does. */
+    promptVersion: text('promptVersion'),
+    error: text('error'),
+
+    // The record itself. Serialised `OcrResponse`, `ParseResult`, `VlmAnswer` and `Timing`.
+    ocrJson: text('ocrJson'),
+    parseJson: text('parseJson'),
+    vlmJson: text('vlmJson'),
+    timingJson: text('timingJson').notNull(),
+
+    /** Unix ms, server-assigned. Ordered, never subtracted - ADR-10. */
+    createdAt: integer('createdAt').notNull(),
+  },
+  (table) => [
+    index('attempts_imageId_createdAt_idx').on(table.imageId, table.createdAt),
+    index('attempts_captureGroupId_idx').on(table.captureGroupId),
+    // The grouping key of every comparison the harness exists to make.
+    index('attempts_method_inputVariant_idx').on(table.method, table.inputVariant),
+    // Phase 06's "has a date" filter and phase 10's median-latency queries.
+    index('attempts_expiryDate_idx').on(table.expiryDate),
+    index('attempts_totalMs_idx').on(table.totalMs),
+  ],
+);
+
+export type AttemptRow = typeof attempts.$inferSelect;
+export type NewAttemptRow = typeof attempts.$inferInsert;

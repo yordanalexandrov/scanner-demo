@@ -16,7 +16,12 @@ import { colors, radius, spacing } from '../theme';
  * to be obvious at a glance that the app is talking to the server it thinks it is.
  */
 
-type Destination = Exclude<keyof RootStackParamList, 'Home'>;
+/**
+ * `Result` is excluded because it is not a destination: it needs an image ID and is reached from a
+ * capture, never from a list of places to go. Excluding it here is also what keeps this list to the
+ * routes that take no parameters, so `navigate` stays typed without a cast.
+ */
+type Destination = Exclude<keyof RootStackParamList, 'Home' | 'Result'>;
 
 const DESTINATIONS: ReadonlyArray<{ route: Destination; title: string; subtitle: string }> = [
   { route: 'Barcode', title: 'Barcode', subtitle: 'Scan EAN-13 and record decode latency' },

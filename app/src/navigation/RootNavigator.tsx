@@ -4,6 +4,7 @@ import { BarcodeScreen } from '../screens/BarcodeScreen';
 import { CaptureScreen } from '../screens/CaptureScreen';
 import { HistoryScreen } from '../screens/HistoryScreen';
 import { HomeScreen } from '../screens/HomeScreen';
+import { ResultScreen } from '../screens/ResultScreen';
 import { LibraryScreen } from '../screens/LibraryScreen';
 import { colors } from '../theme';
 
@@ -21,10 +22,12 @@ export type RootStackParamList = {
   Capture: undefined;
   Library: undefined;
   History: undefined;
+  /** The attempts recorded against one stored image - phase 05, spec screen 5. */
+  Result: { imageId: string };
 };
 
-// Screens take no parameters yet. Declaring the map globally is what makes `navigation.navigate`
-// typed at every call site, so a renamed route is a compile error rather than a runtime no-op.
+// Declaring the map globally is what makes `navigation.navigate` typed at every call site, so a
+// renamed route or a missing parameter is a compile error rather than a runtime no-op.
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace ReactNavigation {
@@ -51,6 +54,7 @@ export function RootNavigator() {
         <Stack.Screen name="Capture" component={CaptureScreen} options={{ title: 'Capture' }} />
         <Stack.Screen name="Library" component={LibraryScreen} options={{ title: 'Library' }} />
         <Stack.Screen name="History" component={HistoryScreen} options={{ title: 'History' }} />
+        <Stack.Screen name="Result" component={ResultScreen} options={{ title: 'Result' }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

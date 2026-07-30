@@ -20,11 +20,12 @@ comparability wins.
 
 ## Status
 
-**Phases 01 to 04 of 10 are complete; phase 05 is next.** Every record the harness stores is
+**Phases 01 to 05 of 10 are complete; phase 06 is next.** Every record the harness stores is
 defined once in `packages/shared`. The server is deployed at `scanner.yo-po.eu`, stores, serves and
 thumbnails images, and records barcode decode latencies. The Android app builds as an Expo development
-build, navigates its five screens, reports whether the server is reachable, and scans EAN-13 with the
-decode latency measured on the phone's monotonic clock. There is no OCR yet — that starts at phase 05.
+build, navigates its screens, scans EAN-13 with the decode latency measured on the phone's monotonic
+clock, and photographs an expiry date, stores it in two variants, reads both with on-device ML Kit and
+extracts the date with the one shared parser.
 See [`docs/phases/README.md`](docs/phases/README.md) for the build order and where the work stands.
 
 ## Layout
@@ -94,7 +95,12 @@ how the benchmark numbers should be read.
 - **ML Kit Text Recognition v2 does not support Cyrillic.** It handles Latin, Chinese, Devanagari,
   Japanese and Korean. The digits of a date read fine, but Bulgarian anchor words
   (`Годен до`, `Срок на годност`) will never be recognised on the on-device path. The server-side
-  engines all handle Cyrillic.
+  engines all handle Cyrillic. **Confirmed on real packaging in phase 05:** `Годен до:` came back as
+  `fogeH A0:`, `ogeH Ao:` and `T ogeH 0:` across three captures, with the digits after it intact every
+  time. The consequence is not a failure to extract but a change of decision path — the parser reaches
+  the date through `sole-candidate` rather than `anchor-proximity`, because the anchor is unreadable.
+  Any accuracy comparison involving the on-device path on Bulgarian packaging has to split by `rule`,
+  or it is comparing two different rules and calling the difference OCR.
 - **The self-hosted engine's default models are Chinese + English.** Cyrillic recognition requires
   selecting a different recognition model explicitly; see [ADR-12](docs/decisions.md) and
   [phase 07](docs/phases/07-ocr-sidecar.md).
@@ -120,6 +126,13 @@ how the benchmark numbers should be read.
   is the cause is an open question recorded in [phase 04](docs/phases/04-barcode.md). Barcode *values*
   from this harness should not be treated as reliable identifiers. Goal 1 measures decode speed, which
   this does not invalidate.
+- **A background upload can make the next measured upload look faster.** Phase 05 archives the
+  full-resolution original after the measured upload finishes. Switching that archive off made the
+  following capture's `uploadMs` about 10% *slower*, reproducibly, across a three-run A-B-A on Wi-Fi —
+  most likely because the large transfer keeps the radio awake and its rate adaptation high. Nothing
+  overlaps the measured window; the effect lands on the capture after it. Any latency figure that
+  spans the network carries this, so runs being compared have to share the same background-traffic
+  pattern. See [phase 05](docs/phases/05-capture-mlkit.md).
 - **The server runs on two cores shared with a live application.** Absolute latencies are therefore not
   portable to other hardware. What stays valid is the comparison between the four methods, since all four
   are measured under the same conditions — and local contention slightly flatters the cloud engines
