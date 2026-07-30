@@ -1,6 +1,7 @@
 # Phase 05 — Expiry capture, on-device OCR, and the date parser
 
-**Status:** not started · **Depends on:** 03, 04 · **Source:** spec milestone 5
+**Status:** in review — code complete, **nothing run on a device yet** · **Depends on:** 03, 04 ·
+**Source:** spec milestone 5
 
 ## Goal
 
@@ -225,14 +226,36 @@ Environment added to `app/.env.example`: `EXPO_PUBLIC_DOWNSCALE_LONG_EDGE` (defa
 
 ## Risks / unknowns
 
-- Whether the ML Kit wrapper exposes a per-block confidence. If it does, ADR-5's `null` handling still
-  holds and nothing downstream changes.
+- Whether the ML Kit wrapper exposes a per-block confidence.
+  **Answered: it does not.** `@react-native-ml-kit/text-recognition@2.0.0` gives every `TextBlock` a
+  `text`, an optional `frame`, its `lines` and its `recognizedLanguages`, and nothing else. Every block
+  therefore carries `confidence: null`, and the result view shows "not reported" rather than a number —
+  ADR-5 stands as written and no consumer needs changing, because `null` was already handled.
+- **`focus()` is not a focus lock.** vision-camera 4.7.3 builds its `FocusMeteringAction` without
+  `disableAutoCancel()` (`CameraSession+Focus.kt:14`), so CameraX cancels the action after five seconds
+  and returns to continuous autofocus. Acceptance criterion 2 asks for a lock. What is implemented
+  instead: the shutter re-focuses at the last tapped point and awaits it whenever that window has
+  lapsed, so the capture never begins mid-hunt. That satisfies "no visible focus hunt" without being
+  the lock the wording implies, and the difference is only observable if a tap is followed by a wait of
+  more than five seconds.
+- **`expo-audio`'s config plugin adds `RECORD_AUDIO` by default**, for a recording API this app never
+  touches. It is blocked in `app.json`; the merged manifest of a debug build was checked to confirm the
+  permission is absent. Worth re-checking whenever a dependency that ships a config plugin is added.
 - ML Kit does not read Cyrillic, so the `Годен до` parser case is exercised only by unit tests and, later,
   by the server engines. This is a property of the method; the README already records it.
 - The full-resolution ML Kit run may be slow enough on older devices to be worth its own note in the
   README. That is a finding, not a problem.
 - Bulgarian packaging frequently prints the date with no anchor at all, which means rule 2 will carry more
   weight than the specification's ordering implies. Worth checking against the first fifty real images.
+- **Untested on hardware.** `@react-native-ml-kit/text-recognition@2.0.0` is an old-architecture
+  `NativeModules` package, and this app runs on the New Architecture in bridgeless mode. The debug APK
+  compiles and links it, but whether the interop layer resolves it at runtime is only answerable on a
+  device. If it does not, the options are an Expo-compatible fork or a small native module of our own —
+  neither of which is visible from here.
+- Two columns of the `attempts` table are nullable where the table above writes them `not null`:
+  `engine` and `parseRule` are derived from `ocr` and `parse`, both of which are null on a failed run.
+  Acceptance criterion 13 requires that run to be recorded, so a `not null` column would make a failure
+  unstorable. A failure is data.
 
 ## Review checkpoint
 
