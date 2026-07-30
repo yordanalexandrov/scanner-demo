@@ -126,6 +126,13 @@ how the benchmark numbers should be read.
   is the cause is an open question recorded in [phase 04](docs/phases/04-barcode.md). Barcode *values*
   from this harness should not be treated as reliable identifiers. Goal 1 measures decode speed, which
   this does not invalidate.
+- **A background upload can make the next measured upload look faster.** Phase 05 archives the
+  full-resolution original after the measured upload finishes. Switching that archive off made the
+  following capture's `uploadMs` about 10% *slower*, reproducibly, across a three-run A-B-A on Wi-Fi —
+  most likely because the large transfer keeps the radio awake and its rate adaptation high. Nothing
+  overlaps the measured window; the effect lands on the capture after it. Any latency figure that
+  spans the network carries this, so runs being compared have to share the same background-traffic
+  pattern. See [phase 05](docs/phases/05-capture-mlkit.md).
 - **The server runs on two cores shared with a live application.** Absolute latencies are therefore not
   portable to other hardware. What stays valid is the comparison between the four methods, since all four
   are measured under the same conditions — and local contention slightly flatters the cloud engines
