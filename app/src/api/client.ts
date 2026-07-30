@@ -1,3 +1,5 @@
+import { File, UploadType } from 'expo-file-system';
+import type { UploadResult } from 'expo-file-system';
 import { apiErrorSchema } from '@scanner-demo/shared';
 import type { ZodType } from 'zod';
 import { config } from '../config';
@@ -202,19 +204,85 @@ export function apiPost<T>(
 }
 
 /**
- * Multipart upload.
+ * Multipart upload of a file already on disk.
  *
- * `Content-Type` is deliberately absent: React Native's fetch sets it, together with the multipart
- * boundary it generated. Setting it here would send a header whose boundary matches nothing.
+ * **This does not go through `fetch`, and that is not an oversight.** Expo installs a
+ * WinterCG-compliant `fetch` as the global one, and its `FormData` conversion rejects React
+ * Native's `{ uri, name, type }` file part outright - `expo/src/winter/fetch/convertFormData.ts`
+ * says so in as many words and throws `Unsupported FormDataPart implementation`. The alternative
+ * that does work through `fetch` is to read the file into memory as a `Blob`; for a
+ * full-resolution photograph that is a multi-megabyte allocation, copied again while the body is
+ * assembled, on the archive path of every capture.
  *
- * Uploads are whole photographs over a phone's uplink, so the default timeout is much longer than
- * for a JSON call. It still exists - a stalled upload must fail rather than hang a screen.
+ * `expo-file-system`'s upload streams the file natively instead. Everything the shared client
+ * exists for is preserved by hand below: the bearer token goes on the request, the status is
+ * checked, and the body is parsed with the same zod schema the server validated it against.
+ *
+ * Uploads are whole photographs over a phone's uplink, so the timeout is much longer than for a
+ * JSON call. It still exists - a stalled upload must fail rather than hang a screen.
  */
-export function apiUpload<T>(
+export async function apiUploadFile<T>(
   path: string,
-  form: FormData,
+  file: File,
   schema: ZodType<T>,
-  options: RequestOptions = {},
+  parts: Record<string, string>,
+  options: { mimeType?: string } = {},
 ): Promise<T> {
-  return request(path, schema, { method: 'POST', body: form }, { timeoutMs: 60_000, ...options });
+  let result: UploadResult;
+
+  try {
+    result = await file.upload(url(path), {
+      httpMethod: 'POST',
+      uploadType: UploadType.MULTIPART,
+      // The server expects exactly these two parts and rejects any other field name.
+      fieldName: 'file',
+      mimeType: options.mimeType ?? 'image/jpeg',
+      parameters: parts,
+      headers: {
+        Authorization: `Bearer ${config.apiToken}`,
+        Accept: 'application/json',
+      },
+    });
+  } catch (error: unknown) {
+    throw new ApiError(error instanceof Error ? error.message : 'The upload failed', {
+      kind: 'network',
+      cause: error,
+    });
+  }
+
+  if (result.status < 200 || result.status >= 300) {
+    const parsedError = safeJson(result.body);
+    const envelope = apiErrorSchema.safeParse(parsedError);
+
+    throw envelope.success
+      ? new ApiError(envelope.data.message, {
+          kind: 'http',
+          status: result.status,
+          code: envelope.data.error,
+        })
+      : new ApiError(`HTTP ${result.status}`, { kind: 'http', status: result.status });
+  }
+
+  const parsed = schema.safeParse(safeJson(result.body));
+
+  if (!parsed.success) {
+    const issues = parsed.error.issues
+      .map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
+      .join('; ');
+    throw new ApiError(`Unexpected response from ${path} - ${issues}`, {
+      kind: 'schema',
+      status: result.status,
+      cause: parsed.error,
+    });
+  }
+
+  return parsed.data;
+}
+
+function safeJson(body: string): unknown {
+  try {
+    return JSON.parse(body);
+  } catch {
+    return null;
+  }
 }

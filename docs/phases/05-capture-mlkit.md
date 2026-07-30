@@ -224,6 +224,64 @@ Environment added to `app/.env.example`: `EXPO_PUBLIC_DOWNSCALE_LONG_EDGE` (defa
     silent gap.
 14. There is no "run all" control on this screen.
 
+## Measured on device
+
+First run on an `SM-S928B (Android 16)`, real Bulgarian packaging, against a local server. Enough to
+show the pipeline works end to end and to produce two findings worth more than the phase expected.
+
+**The downscaled variant read better than the full-resolution original, and three times faster.** On
+one capture the 1200×1600 upload returned `Годен до: 07/2027` and parsed `2027-07-31`, while the
+3000×4000 original returned no date at all. `engineMs` was 80 ms against 254 ms. One capture is not a
+result, but it is the exact question [ADR-2](../decisions.md#adr-2--the-on-device-path-runs-against-both-image-variants)
+exists to ask, and the first answer points the opposite way to the intuition that more pixels read
+better. Worth watching as the dataset grows.
+
+**Cyrillic behaves exactly as the README says it does.** ML Kit rendered `Годен до:` as `fogeH A0:`,
+`ogeH Ao:` and `T ogeH 0:` across three captures — and the digits after it came through intact every
+time. The parse still succeeded, through `sole-candidate` rather than `anchor-proximity`, because the
+anchor was unreadable. That is [ADR-4](../decisions.md#adr-4--bbox-is-nullable-and-the-parser-records-which-rule-decided)'s
+fallback working on real packaging, and it is why `rule` is recorded on every attempt: on Bulgarian
+packaging the on-device path will almost never get to use the anchor rule, and any accuracy comparison
+that does not split by `rule` will be comparing different decision paths.
+
+Three defects, all found because the numbers were on screen next to each other, all fixed:
+
+| Defect | Why it happened |
+|---|---|
+| Every `original` attempt failed with `ENOENT` | The background archive deleted the temporary file the on-device path still had to read. The `upload` variant reads the manipulator's output, which nothing deleted — so the failure looked like a property of the method |
+| The upload's long edge was 2133px against a configured 1600 | vision-camera reports `photo.width`/`photo.height` in sensor orientation, so a portrait capture claims to be 4000×3000 while the file is 3000×4000. The orientation is now read from the decoded image, and `captureWidth`/`captureHeight` record what the file is rather than what its producer claimed |
+| `totalMs` read 69.6 ms directly beneath segments summing to 1587 ms | It was measured from the method button rather than from the shutter. ADR-10 says the user-visible action, which begins at the shutter |
+
+Two things outside our code had to be worked around, both recorded in the source:
+
+- **Expo replaces the global `fetch`**, and its WinterCG `FormData` rejects React Native's
+  `{ uri, name, type }` file part outright — `expo/src/winter/fetch/convertFormData.ts` says so and
+  throws `Unsupported FormDataPart implementation`. Uploads now go through `expo-file-system`'s
+  native multipart upload, which also streams instead of reading a full-resolution photograph into
+  JavaScript memory and copying it again.
+- **The lens that focuses closest has no torch.** Sorting the back cameras by `minFocusDistance`
+  picks the ultra-wide at 5 cm, which is the right lens for small print held close — and it has no
+  flash unit, while the specification has the torch defaulting to on. Asking a device without one for
+  `torch="on"` throws and leaves a dead preview. The request is now gated on the hardware and the gap
+  is labelled on screen, because the choice between light and close focus is the operator's to make.
+
+## Open questions
+
+- **Should the framing guide crop what is sent to OCR?** The operator aims the guide at the date they
+  care about, and that intent is currently discarded. Cropping to it would raise accuracy and would
+  also be irreversible: phase 06 exists to re-run later engines against stored images, and a cropped
+  dataset can never answer "does this engine find the date on the package" again. It would also stop
+  exercising `latest-of-pair` and `anchor-proximity`, which exist precisely because packaging carries
+  more than one date. A parser that merely *prefers* candidates inside the guide is worse still — the
+  VLM returns no reliable boxes ([ADR-4](../decisions.md#adr-4--bbox-is-nullable-and-the-parser-records-which-rule-decided)),
+  so such a rule would help three methods of four and become exactly the kind of parser artefact that
+  hits methods unevenly. The proposal on the table is to **record the guide rectangle without cropping**
+  and treat "cropped to guide" as a third `inputVariant` measured against the full frame, the way ADR-2
+  treats original against upload. Deferred until there are fifty real images to decide on.
+- **Which physical lens took a capture is not recorded.** Two photographs of the same package through
+  the ultra-wide and the main camera are different inputs, and nothing in `ImageRecord` distinguishes
+  them. If lens choice turns out to move the accuracy numbers, this becomes a field.
+
 ## Risks / unknowns
 
 - Whether the ML Kit wrapper exposes a per-block confidence.

@@ -34,11 +34,19 @@ export interface CaptureSource {
   torch: boolean | null;
   /** `null` for a gallery import, which had no capture to time - ADR-10. */
   captureMs: Millis | null;
+  /** When the user-visible action began - the shutter, or the moment the picker returned. */
+  startedAt: Millis;
 }
 
 export interface StoredCapture {
   imageId: string;
   captureGroupId: string;
+  /**
+   * The instant the shutter fired, from `now()`. `totalMs` is measured from here rather than from
+   * the method button, because the user-visible action begins at the shutter - ADR-10. Without it
+   * the total would sit on screen underneath segments that add up to several times its own value.
+   */
+  startedAt: Millis;
   /** The uploaded, downscaled variant - the bytes every engine will be compared on. */
   upload: { uri: string; width: number; height: number };
   /** The untouched capture, or `null` when the source was already inside the target size. */
@@ -47,13 +55,6 @@ export interface StoredCapture {
   uploadMs: Millis;
   capturedAt: number;
 }
-
-/**
- * The multipart part's filename, which the server ignores: it derives the media type from the bytes
- * and assigns its own ID - ADR-3. A constant is therefore honest here, and it keeps a clock read out
- * of a code path that has nothing to do with time.
- */
-const PART_FILENAME = { upload: 'upload.jpg', original: 'original.jpg' } as const;
 
 /** Best-effort. A temporary file that outlives its flow is a defect; a failed delete is not fatal. */
 export function discard(uri: string | null | undefined): void {
@@ -79,31 +80,31 @@ export function discard(uri: string | null | undefined): void {
 export async function storeCapture(source: CaptureSource): Promise<StoredCapture> {
   const captureGroupId = randomUUID();
 
-  const downscaled = await downscaleForUpload(source);
+  const downscaled = await downscaleForUpload(source.uri);
 
   const uploaded = await measureAsync(async () =>
-    uploadImage(
-      { uri: downscaled.uri, name: PART_FILENAME.upload, type: 'image/jpeg' },
-      {
-        captureGroupId,
-        variant: 'upload',
-        source: source.source,
-        torch: source.torch,
-        captureWidth: source.width,
-        captureHeight: source.height,
-        downscaled: downscaled.resized,
-        capturedAt: source.capturedAt,
-        capturedAtSource: source.capturedAtSource,
-      },
-    ),
+    uploadImage(downscaled.uri, {
+      captureGroupId,
+      variant: 'upload',
+      source: source.source,
+      torch: source.torch,
+      // The dimensions the image actually has, not the ones its producer claimed - see the note in
+      // downscale.ts about sensor orientation.
+      captureWidth: downscaled.sourceWidth,
+      captureHeight: downscaled.sourceHeight,
+      downscaled: downscaled.resized,
+      capturedAt: source.capturedAt,
+      capturedAtSource: source.capturedAtSource,
+    }),
   );
 
   return {
     imageId: uploaded.value.imageId,
     captureGroupId,
+    startedAt: source.startedAt,
     upload: { uri: downscaled.uri, width: downscaled.width, height: downscaled.height },
     original: downscaled.resized
-      ? { uri: source.uri, width: source.width, height: source.height }
+      ? { uri: source.uri, width: downscaled.sourceWidth, height: downscaled.sourceHeight }
       : null,
     downscaleMs: downscaled.ms,
     uploadMs: uploaded.ms,
@@ -126,20 +127,17 @@ export async function archiveOriginal(
     return false;
   }
 
-  await uploadImage(
-    { uri: stored.original.uri, name: PART_FILENAME.original, type: 'image/jpeg' },
-    {
-      captureGroupId: stored.captureGroupId,
-      variant: 'original',
-      source: source.source,
-      torch: source.torch,
-      captureWidth: source.width,
-      captureHeight: source.height,
-      downscaled: false,
-      capturedAt: source.capturedAt,
-      capturedAtSource: source.capturedAtSource,
-    },
-  );
+  await uploadImage(stored.original.uri, {
+    captureGroupId: stored.captureGroupId,
+    variant: 'original',
+    source: source.source,
+    torch: source.torch,
+    captureWidth: stored.original.width,
+    captureHeight: stored.original.height,
+    downscaled: false,
+    capturedAt: source.capturedAt,
+    capturedAtSource: source.capturedAtSource,
+  });
 
   return true;
 }

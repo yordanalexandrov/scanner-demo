@@ -1,6 +1,7 @@
+import { File } from 'expo-file-system';
 import { imageListResponseSchema, imageUploadResponseSchema } from '@scanner-demo/shared';
 import type { ImageListResponse, ImageUploadMeta, ImageUploadResponse } from '@scanner-demo/shared';
-import { apiGet, apiUpload, type RequestOptions } from './client';
+import { apiGet, apiUploadFile, type RequestOptions } from './client';
 
 /**
  * The image store.
@@ -10,25 +11,16 @@ import { apiGet, apiUpload, type RequestOptions } from './client';
  * metadata verifiable rather than merely claimed - ADR-3.
  */
 
-export interface UploadFile {
-  uri: string;
-  name: string;
-  type: string;
-}
-
-export function uploadImage(
-  file: UploadFile,
-  meta: ImageUploadMeta,
-  options: RequestOptions = {},
-): Promise<ImageUploadResponse> {
-  const form = new FormData();
-
-  // React Native's FormData takes this shape for a file part and streams it from disk rather than
-  // reading it into JS memory - which matters when the part is a full-resolution photograph.
-  form.append('file', file as unknown as Blob);
-  form.append('meta', JSON.stringify(meta));
-
-  return apiUpload('/api/v1/images', form, imageUploadResponseSchema, options);
+export function uploadImage(uri: string, meta: ImageUploadMeta): Promise<ImageUploadResponse> {
+  return apiUploadFile(
+    '/api/v1/images',
+    new File(uri),
+    imageUploadResponseSchema,
+    // The server parses this part with `imageUploadMetaSchema`, which is strict, so a field that
+    // does not belong is a 400 rather than something quietly dropped.
+    { meta: JSON.stringify(meta) },
+    { mimeType: 'image/jpeg' },
+  );
 }
 
 export function fetchImages(

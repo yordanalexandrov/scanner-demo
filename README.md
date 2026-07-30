@@ -94,7 +94,12 @@ how the benchmark numbers should be read.
 - **ML Kit Text Recognition v2 does not support Cyrillic.** It handles Latin, Chinese, Devanagari,
   Japanese and Korean. The digits of a date read fine, but Bulgarian anchor words
   (`Годен до`, `Срок на годност`) will never be recognised on the on-device path. The server-side
-  engines all handle Cyrillic.
+  engines all handle Cyrillic. **Confirmed on real packaging in phase 05:** `Годен до:` came back as
+  `fogeH A0:`, `ogeH Ao:` and `T ogeH 0:` across three captures, with the digits after it intact every
+  time. The consequence is not a failure to extract but a change of decision path — the parser reaches
+  the date through `sole-candidate` rather than `anchor-proximity`, because the anchor is unreadable.
+  Any accuracy comparison involving the on-device path on Bulgarian packaging has to split by `rule`,
+  or it is comparing two different rules and calling the difference OCR.
 - **The self-hosted engine's default models are Chinese + English.** Cyrillic recognition requires
   selecting a different recognition model explicitly; see [ADR-12](docs/decisions.md) and
   [phase 07](docs/phases/07-ocr-sidecar.md).

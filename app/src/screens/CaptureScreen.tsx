@@ -1,9 +1,17 @@
-import { useCallback, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Image,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { useIsFocused, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as ImagePicker from 'expo-image-picker';
-import { Camera, useCameraDevice, useCameraFormat } from 'react-native-vision-camera';
+import { Camera, useCameraFormat } from 'react-native-vision-camera';
 import { elapsed, now } from '@scanner-demo/shared';
 import type { Method, Millis } from '@scanner-demo/shared';
 import { ApiError } from '../api/client';
@@ -12,6 +20,7 @@ import { FramingGuide } from '../components/FramingGuide';
 import { MethodButtons } from '../components/MethodButtons';
 import { config } from '../config';
 import { useCameraPermission } from '../hooks/useCameraPermission';
+import { describeLens, useCaptureDevices } from '../hooks/useCaptureDevices';
 import { useIsForeground } from '../hooks/useIsForeground';
 import {
   archiveOriginal,
@@ -55,7 +64,11 @@ interface RunOutcome {
 export function CaptureScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const permission = useCameraPermission();
-  const device = useCameraDevice('back');
+  // Ordered by how close each lens can focus, not by vision-camera's general score - a date held a
+  // few centimetres from the phone is out of range for the main wide camera on most handsets.
+  const devices = useCaptureDevices();
+  const [lensIndex, setLensIndex] = useState(0);
+  const device = devices[lensIndex] ?? devices[0];
 
   // The maximum the sensor offers. The hard case here is an embossed or laser-etched date, where
   // the difference between resolutions is the difference between readable and not.
@@ -72,6 +85,15 @@ export function CaptureScreen() {
   // than they are hurt by it.
   const [torch, setTorch] = useState<'off' | 'on'>('on');
 
+  /**
+   * On this handset the lens that focuses closest has no flash unit at all, and asking a device
+   * without one for `torch="on"` throws and leaves the screen with a dead preview. So the request
+   * is gated on the hardware and the gap is labelled rather than silently swallowed - the operator
+   * is choosing between light and close focus, and that is a choice worth seeing.
+   */
+  const hasTorch = device?.hasTorch === true;
+  const effectiveTorch = hasTorch && torch === 'on' ? 'on' : 'off';
+
   const [stage, setStage] = useState<Stage>('framing');
   const [stored, setStored] = useState<StoredCapture | null>(null);
   const [source, setSource] = useState<CaptureSource | null>(null);
@@ -79,6 +101,21 @@ export function CaptureScreen() {
   const [running, setRunning] = useState<Method | null>(null);
   const [outcomes, setOutcomes] = useState<RunOutcome[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  /**
+   * The frame that was taken, shown over the preview from the moment the shutter returns.
+   *
+   * `takePhoto()` measured 1.2 s on this handset, and the store-and-upload that follows takes
+   * seconds more. A live preview through all of that says nothing is happening; freezing on the
+   * captured frame says something is, and it also lets the operator see whether the shot was in
+   * focus before spending a method run on it - spec, § Screens, which allows freezing the preview.
+   */
+  const [previewUri, setPreviewUri] = useState<string | null>(null);
+
+  // Read by the unmount cleanup below, which must see the latest value rather than the one closed
+  // over when the effect was created.
+  const storedRef = useRef<StoredCapture | null>(null);
+  storedRef.current = stored;
 
   const isActive = isFocused && isForeground && stage !== 'stored';
 
@@ -118,13 +155,14 @@ export function CaptureScreen() {
       setStage('stored');
 
       // Started strictly after the measured upload resolved - ADR-3, acceptance criterion 7.
+      //
+      // It deliberately does NOT delete the original afterwards. The on-device path still has to
+      // read those exact pixels for its `original` attempt - ADR-2 - and deleting them here raced
+      // the run and produced an ENOENT instead of a measurement. Both temporary files are removed
+      // when the screen is left or reset, which is what "once the flow has settled" means in
+      // acceptance criterion 4.
       void archiveOriginal(result, captureSource)
-        .then((didArchive) => {
-          setArchived(didArchive);
-          if (didArchive) {
-            discard(result.original?.uri);
-          }
-        })
+        .then(setArchived)
         .catch(() => setArchived(false));
     } catch (failure: unknown) {
       setError(
@@ -152,8 +190,10 @@ export function CaptureScreen() {
       const shutterAt = now();
       const photo = await camera.current.takePhoto({ flash: 'off', enableShutterSound: false });
       const captureMs = elapsed(shutterAt);
+      setPreviewUri(`file://${photo.path}`);
 
       await beginFrom({
+        startedAt: shutterAt,
         uri: `file://${photo.path}`,
         width: photo.width,
         height: photo.height,
@@ -161,7 +201,7 @@ export function CaptureScreen() {
         // eslint-disable-next-line no-restricted-syntax -- ordered timestamp, not a duration
         capturedAt: Date.now(),
         capturedAtSource: 'camera',
-        torch: torch === 'on',
+        torch: effectiveTorch === 'on',
         captureMs,
       });
     } catch (failure: unknown) {
@@ -175,6 +215,7 @@ export function CaptureScreen() {
     setOutcomes([]);
     setArchived(null);
 
+    const pickedAt = now();
     const picked = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       // No editing and no re-encoding: the dataset is only worth having if the bytes are the ones
@@ -190,12 +231,14 @@ export function CaptureScreen() {
     }
 
     setStage('capturing');
+    setPreviewUri(asset.uri);
 
     const exifCapturedAt = parseExifCapturedAt(
       (asset.exif as Record<string, unknown> | undefined)?.['DateTimeOriginal'],
     );
 
     await beginFrom({
+      startedAt: pickedAt,
       uri: asset.uri,
       width: asset.width,
       height: asset.height,
@@ -237,7 +280,11 @@ export function CaptureScreen() {
       ];
 
       for (const { variant, image } of variants) {
-        const startedAt = now();
+        // The measured path began at the shutter, so that is where the upload variant's total
+        // starts - ADR-10. The `original` run carries none of those segments and therefore times
+        // only itself; a total that excluded the capture would sit on screen underneath segments
+        // adding up to many times its own value.
+        const startedAt = variant === 'upload' ? stored.startedAt : now();
         const outcome = await runMlKit({
           imageId: stored.imageId,
           captureGroupId: stored.captureGroupId,
@@ -274,11 +321,22 @@ export function CaptureScreen() {
     discard(stored?.original?.uri);
     setStored(null);
     setSource(null);
+    setPreviewUri(null);
     setOutcomes([]);
     setArchived(null);
     setError(null);
     setStage('framing');
   }, [stored]);
+
+  // Criterion 4: no full-size photo may survive the flow. `reset` covers "capture another"; this
+  // covers walking away from the screen, which is the more likely of the two.
+  useEffect(
+    () => () => {
+      discard(storedRef.current?.upload.uri);
+      discard(storedRef.current?.original?.uri);
+    },
+    [],
+  );
 
   if (!permission.granted) {
     return (
@@ -313,37 +371,71 @@ export function CaptureScreen() {
               format={format}
               isActive={isActive}
               photo
-              torch={torch}
+              torch={effectiveTorch}
               onError={(cameraError) => setError(cameraError.message)}
             />
             <FramingGuide hint="Fill the frame with the printed date, then tap to focus" />
           </Pressable>
         )}
 
+        {previewUri !== null && (
+          // Over the preview, not instead of it: the camera underneath is untouched, exactly as it
+          // is on the barcode screen when a code is hit.
+          <Image
+            source={{ uri: previewUri }}
+            style={StyleSheet.absoluteFill}
+            resizeMode="contain"
+          />
+        )}
+
+        {stage === 'capturing' && (
+          <View style={styles.busy} pointerEvents="none">
+            <ActivityIndicator size="large" color="#ffffff" />
+            <Text style={styles.busyLabel}>
+              {previewUri === null ? 'Capturing…' : 'Downscaling and uploading…'}
+            </Text>
+          </View>
+        )}
+
         <View style={styles.overlayTop} pointerEvents="box-none">
           <View style={styles.badge}>
             <Text style={styles.badgeText}>
-              {stage === 'stored' ? 'captured' : 'live'} · {config.downscaleLongEdge}px q
-              {config.downscaleQuality}
+              {stage === 'stored' ? 'captured' : 'live'} · {describeLens(device)}
+              {hasTorch ? '' : ' · no torch'}
+            </Text>
+            <Text style={styles.badgeText}>
+              {config.downscaleLongEdge}px q{config.downscaleQuality}
               {config.archiveOriginal ? ' · archiving' : ''}
             </Text>
           </View>
 
           {stage !== 'stored' && (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Toggle torch"
-              style={({ pressed }) => [
-                styles.torch,
-                torch === 'on' && styles.torchOn,
-                pressed && styles.pressed,
-              ]}
-              onPress={() => setTorch((current) => (current === 'on' ? 'off' : 'on'))}
-            >
-              <Text style={[styles.torchLabel, torch === 'on' && styles.torchLabelOn]}>
-                Torch {torch}
-              </Text>
-            </Pressable>
+            <View style={styles.overlayButtons}>
+              {devices.length > 1 && (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Switch lens"
+                  style={({ pressed }) => [styles.torch, pressed && styles.pressed]}
+                  onPress={() => setLensIndex((current) => (current + 1) % devices.length)}
+                >
+                  <Text style={styles.torchLabel}>Lens</Text>
+                </Pressable>
+              )}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Toggle torch"
+                style={({ pressed }) => [
+                  styles.torch,
+                  torch === 'on' && styles.torchOn,
+                  pressed && styles.pressed,
+                ]}
+                onPress={() => setTorch((current) => (current === 'on' ? 'off' : 'on'))}
+              >
+                <Text style={[styles.torchLabel, torch === 'on' && styles.torchLabelOn]}>
+                  Torch {torch}
+                </Text>
+              </Pressable>
+            </View>
           )}
         </View>
       </View>
@@ -458,6 +550,19 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xs,
   },
   badgeText: { color: '#ffffff', fontFamily: 'monospace', fontSize: 12 },
+  busy: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    bottom: 0,
+    gap: spacing.sm,
+    justifyContent: 'center',
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+  },
+  busyLabel: { color: '#ffffff', fontSize: 14, fontWeight: '600' },
+  overlayButtons: { flexDirection: 'row', gap: spacing.sm },
   torch: {
     backgroundColor: 'rgba(0, 0, 0, 0.55)',
     borderRadius: radius.md,
