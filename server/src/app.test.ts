@@ -2,13 +2,15 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import sharp from 'sharp';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   PARSER_VERSION,
+  PRICING_VERSION,
   TIMING_VERSION,
   imageListQuerySchema,
+  ocrResponseSchema,
   parseExpiryDate,
 } from '@scanner-demo/shared';
 import type {
@@ -17,10 +19,13 @@ import type {
   BarcodeScan,
   BarcodeScanCreate,
   ImageUploadMeta,
+  OcrResponse,
 } from '@scanner-demo/shared';
 import { buildServer } from './app.js';
 import { openDatabase } from './db/client.js';
 import type { DbHandle } from './db/client.js';
+import { OcrEngineError } from './engines/types.js';
+import type { OcrEngine } from './engines/types.js';
 import { loadEnv } from './env.js';
 import type { Env } from './env.js';
 import type { ListCursor } from './lib/cursor.js';
@@ -357,6 +362,198 @@ describe('path traversal', () => {
     });
 
     expect(response.statusCode).toBe(400);
+  });
+});
+
+describe('self-hosted OCR', () => {
+  /**
+   * The sidecar is a container, so the route is exercised against a stub engine behind the same
+   * interface phases 08 and 09 will implement. What is under test here is the route's contract -
+   * the path never coming from the client, the failure mapping, the timing fields - and none of
+   * that is a property of RapidOCR. The adapter itself is tested against real HTTP in
+   * `engines/localOcr.test.ts`, and the container itself in the acceptance criteria.
+   */
+  function stubEngine(
+    behaviour: (input: { imageId: string; path: string }) => Promise<OcrResponse>,
+  ) {
+    const calls: { imageId: string; path: string }[] = [];
+
+    return {
+      calls,
+      engine: {
+        name: 'onnx-paddleocr',
+        recognise: (input: { imageId: string; path: string }) => {
+          calls.push(input);
+          return behaviour(input);
+        },
+      },
+    };
+  }
+
+  function ocrResponse(overrides: Partial<OcrResponse> = {}): OcrResponse {
+    return {
+      engine: 'onnx-paddleocr',
+      rawText: 'roeH 0: 07/2027',
+      blocks: [{ text: 'roeH 0: 07/2027', bbox: [57, 640, 926, 105], confidence: 0.85122 }],
+      engineMs: 1854,
+      engineMsScope: 'inference+network',
+      serverTotalMs: null,
+      imageWidth: 1200,
+      imageHeight: 1600,
+      usage: null,
+      costEstimateUsd: 0,
+      pricingVersion: PRICING_VERSION,
+      ...overrides,
+    };
+  }
+
+  /** A second instance over the same database, so uploads made through `app` are visible to it. */
+  async function withEngine(engine: OcrEngine): Promise<FastifyInstance> {
+    const instance = await buildServer({ env, db: handle.db, localOcrEngine: engine });
+    ocrApps.push(instance);
+    return instance;
+  }
+
+  function post(
+    instance: FastifyInstance,
+    body: object,
+    token: string | null = TOKEN,
+  ): Promise<LightMyRequestResponse> {
+    return instance.inject({
+      method: 'POST',
+      url: '/api/v1/ocr/local',
+      headers: token === null ? {} : { authorization: `Bearer ${token}` },
+      payload: body,
+    });
+  }
+
+  let ocrApps: FastifyInstance[] = [];
+
+  afterEach(async () => {
+    await Promise.all(ocrApps.map((instance) => instance.close()));
+    ocrApps = [];
+  });
+
+  it('returns an OcrResponse that validates against the shared schema - criterion 8', async () => {
+    const { imageId } = await upload(await testImage(1200, 1600));
+    const stub = stubEngine(() => Promise.resolve(ocrResponse()));
+    const instance = await withEngine(stub.engine);
+
+    const response = await post(instance, { imageId });
+
+    expect(response.statusCode).toBe(200);
+    expect(ocrResponseSchema.safeParse(response.json()).success).toBe(true);
+    expect(stub.calls).toHaveLength(1);
+  });
+
+  it('builds the path itself, from the stored row', async () => {
+    const { imageId } = await upload(await testImage(1200, 1600));
+    const stub = stubEngine(() => Promise.resolve(ocrResponse()));
+    const instance = await withEngine(stub.engine);
+
+    await post(instance, { imageId });
+
+    // Inside the image directory, named after the ID, with the extension the server derived from
+    // the bytes - nothing here came from the request body.
+    expect(stub.calls[0]?.path).toBe(path.join(env.imageDir, `${imageId}.jpg`));
+  });
+
+  it('refuses a path where an ID belongs and touches nothing - criterion 9', async () => {
+    const stub = stubEngine(() => Promise.resolve(ocrResponse()));
+    const instance = await withEngine(stub.engine);
+
+    const response = await post(instance, { imageId: '../../etc/passwd' });
+
+    expect(response.statusCode).toBe(400);
+    // The guard is not "it returned 400": it is that nothing downstream of the check ever ran.
+    expect(stub.calls).toEqual([]);
+  });
+
+  it('refuses a body carrying a field it does not know', async () => {
+    const { imageId } = await upload(await testImage(1200, 1600));
+    const stub = stubEngine(() => Promise.resolve(ocrResponse()));
+    const instance = await withEngine(stub.engine);
+
+    const response = await post(instance, { imageId, path: '/etc/passwd' });
+
+    expect(response.statusCode).toBe(400);
+    expect(stub.calls).toEqual([]);
+  });
+
+  it('404s for a well-formed ID that is not in the library', async () => {
+    const stub = stubEngine(() => Promise.resolve(ocrResponse()));
+    const instance = await withEngine(stub.engine);
+
+    const response = await post(instance, { imageId: randomUUID() });
+
+    expect(response.statusCode).toBe(404);
+    expect(stub.calls).toEqual([]);
+  });
+
+  it('requires the bearer token', async () => {
+    const stub = stubEngine(() => Promise.resolve(ocrResponse()));
+    const instance = await withEngine(stub.engine);
+
+    expect((await post(instance, { imageId: randomUUID() }, null)).statusCode).toBe(401);
+    expect(stub.calls).toEqual([]);
+  });
+
+  it('answers 504 when the engine times out rather than hanging - criterion 10', async () => {
+    const { imageId } = await upload(await testImage(1200, 1600));
+    const stub = stubEngine(() =>
+      Promise.reject(
+        new OcrEngineError('The OCR sidecar did not answer within 30000 ms', {
+          timedOut: true,
+        }),
+      ),
+    );
+    const instance = await withEngine(stub.engine);
+
+    const response = await post(instance, { imageId });
+
+    // A timeout is its own answer, not a generic 502: "the engine was too slow" and "the engine was
+    // wrong" are different results about the engine.
+    expect(response.statusCode).toBe(504);
+    expect((response.json() as { error: string }).error).toBe('engine_timeout');
+  });
+
+  it('answers 502 when the engine fails', async () => {
+    const { imageId } = await upload(await testImage(1200, 1600));
+    const stub = stubEngine(() => Promise.reject(new OcrEngineError('answered HTTP 500')));
+    const instance = await withEngine(stub.engine);
+
+    const response = await post(instance, { imageId });
+
+    expect(response.statusCode).toBe(502);
+    expect((response.json() as { error: string }).error).toBe('engine_failed');
+  });
+
+  it('reports serverTotalMs as the handler, which is longer than the call - criterion 12', async () => {
+    const { imageId } = await upload(await testImage(1200, 1600));
+    const stub = stubEngine(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return ocrResponse({ engineMs: 20 });
+    });
+    const instance = await withEngine(stub.engine);
+
+    const body = (await post(instance, { imageId })).json() as OcrResponse;
+
+    expect(body.serverTotalMs).not.toBeNull();
+    // The row read and the response are inside `serverTotalMs` and outside `engineMs`. Both come
+    // from the same clock, so this subtraction is one ADR-10 permits - and what it measures is this
+    // handler's own overhead, not the process boundary, because the boundary is inside `engineMs`.
+    expect(body.serverTotalMs ?? 0).toBeGreaterThan(body.engineMs);
+  });
+
+  it('never polls: the engine is called once per request', async () => {
+    const { imageId } = await upload(await testImage(1200, 1600));
+    const stub = stubEngine(() => Promise.resolve(ocrResponse()));
+    const instance = await withEngine(stub.engine);
+
+    await post(instance, { imageId });
+    await post(instance, { imageId });
+
+    expect(stub.calls).toHaveLength(2);
   });
 });
 
@@ -962,6 +1159,16 @@ describe('library filters', () => {
     // Not silently coerced: every non-empty string is truthy in JavaScript, and a filter that reads
     // "no" as "yes" would make the grid disagree with the database without saying so.
     expect((await list('?hasAttempts=yes')).statusCode).toBe(400);
+  });
+
+  it('refuses a filter it does not know rather than ignoring it - phase 07 item 22', async () => {
+    // The failure this prevents was observed on 2026-07-30: a deployed server five commits behind
+    // the app answered an unknown filter with a full page of rows, so the grid looked like it was
+    // filtering and was not. A filter that lies is worse than one that fails.
+    const response = await list('?captureGroupId=does-not-exist&noSuchFilter=1');
+
+    expect(response.statusCode).toBe(400);
+    expect((response.json() as { message: string }).message).toContain('noSuchFilter');
   });
 });
 

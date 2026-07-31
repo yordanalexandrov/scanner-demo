@@ -3,7 +3,7 @@ import { measureAsync, now } from '@scanner-demo/shared';
 import type { ImageRecord, Method } from '@scanner-demo/shared';
 import { downloadImage } from '../api/images';
 import { discard } from './capture';
-import { runMlKit } from './runMethod';
+import { runLocalOcr, runMlKit } from './runMethod';
 import type { RunMethodResult } from './runMethod';
 
 /**
@@ -91,6 +91,7 @@ export async function rerunMlKit(input: RerunInput): Promise<RunMethodResult> {
   try {
     return await runMlKit({
       imageId: anchor.id,
+      sourceImageId: target.id,
       captureGroupId: anchor.captureGroupId,
       // Which pixels were read. `target` and `anchor` differ exactly when this is `original`.
       inputVariant: target.variant,
@@ -116,6 +117,47 @@ export async function rerunMlKit(input: RerunInput): Promise<RunMethodResult> {
 }
 
 /**
+ * Runs the self-hosted sidecar over a stored image.
+ *
+ * **Nothing is downloaded.** The server already holds the bytes and the engine reads them there, so
+ * this path has no `downloadMs` at all - `null`, because no download happened, not `0` - and no
+ * temporary file to sweep. That asymmetry with {@link rerunMlKit} is the honest one: the on-device
+ * engine needs the pixels on the handset and this one does not, and hiding it by downloading them
+ * anyway would add a segment to the measurement that the real path never pays.
+ *
+ * `startedAt` is still the first work attributable to this run, which here is the request itself -
+ * ADR-22.
+ */
+export async function rerunLocalOcr(input: RerunInput): Promise<RunMethodResult> {
+  const { anchor, target } = input;
+
+  const startedAt = now();
+
+  return runLocalOcr({
+    imageId: anchor.id,
+    // The row the server reads. These differ exactly when an archived `original` is being re-run.
+    sourceImageId: target.id,
+    captureGroupId: anchor.captureGroupId,
+    inputVariant: target.variant,
+    // Unused by this method - it recognises server-side - but part of the shared input, and the
+    // stored figures are the server's own, derived from the bytes with sharp rather than claimed.
+    uri: '',
+    imageWidth: target.width,
+    imageHeight: target.height,
+    // The capture's own date, not today's, so a re-run a year later reaches the same verdict on
+    // unchanged pixels - ADR-6.
+    referenceDate: new Date(target.capturedAt),
+    prior: {
+      captureMs: null,
+      downscaleMs: null,
+      uploadMs: null,
+      downloadMs: null,
+    },
+    startedAt,
+  });
+}
+
+/**
  * "Re-run all methods on this image" - the one place a batch action belongs, because it operates on
  * a fixed stored image rather than on a live capture.
  *
@@ -130,12 +172,15 @@ export async function rerunMethods(
 ): Promise<void> {
   for (const method of input.methods) {
     try {
-      if (method !== 'mlkit') {
-        // Phases 07 to 09 add their own branches here. Until then the buttons are disabled and this
-        // is unreachable from the UI; throwing beats silently recording nothing.
+      if (method === 'mlkit') {
+        onResult(method, await rerunMlKit(input));
+      } else if (method === 'onnx-paddleocr') {
+        onResult(method, await rerunLocalOcr(input));
+      } else {
+        // Phases 08 and 09 add their own branches here. Until then those buttons are disabled and
+        // this is unreachable from the UI; throwing beats silently recording nothing.
         throw new Error(`${method} is not available yet`);
       }
-      onResult(method, await rerunMlKit(input));
     } catch (failure: unknown) {
       onResult(method, failure instanceof Error ? failure : new Error('The re-run failed'));
     }

@@ -31,7 +31,7 @@ import {
   type CaptureSource,
   type StoredCapture,
 } from '../lib/capture';
-import { runMlKit } from '../lib/runMethod';
+import { runLocalOcr, runMlKit } from '../lib/runMethod';
 import type { RootStackParamList } from '../navigation/RootNavigator';
 import { colors, radius, spacing } from '../theme';
 
@@ -260,7 +260,7 @@ export function CaptureScreen() {
    */
   const run = useCallback(
     async (method: Method) => {
-      if (stored === null || source === null || method !== 'mlkit') {
+      if (stored === null || source === null) {
         return;
       }
 
@@ -270,19 +270,31 @@ export function CaptureScreen() {
       const referenceDate = new Date(stored.capturedAt);
       const results: RunOutcome[] = [];
 
-      const variants = [
-        { variant: 'upload' as const, image: stored.upload },
-        ...(stored.original === null
-          ? []
-          : [{ variant: 'original' as const, image: stored.original }]),
-      ];
+      // **One run, against the uploaded variant only, for the server-side methods.** The original
+      // is archived in the background and not at all when `ARCHIVE_ORIGINAL` is off, so the server
+      // may not hold it yet when the button is pressed; the uploaded row is the one that always
+      // exists - ADR-2. Comparing the two variants on this engine belongs in the Library, where the
+      // archive has certainly landed.
+      const variants =
+        method === 'mlkit'
+          ? [
+              { variant: 'upload' as const, image: stored.upload },
+              ...(stored.original === null
+                ? []
+                : [{ variant: 'original' as const, image: stored.original }]),
+            ]
+          : [{ variant: 'upload' as const, image: stored.upload }];
 
       for (const { variant, image } of variants) {
         // One button can produce two rows, so "method invocation" means one fresh start per row.
         // Otherwise the original total includes the upload inference that ran before it - ADR-22.
         const startedAt = now();
-        const outcome = await runMlKit({
+
+        const input = {
           imageId: stored.imageId,
+          // The capture screen only ever runs the row it just uploaded; the two diverge in the
+          // Library, where an archived original can be the target.
+          sourceImageId: stored.imageId,
           captureGroupId: stored.captureGroupId,
           inputVariant: variant,
           uri: image.uri,
@@ -298,7 +310,9 @@ export function CaptureScreen() {
             downloadMs: null,
           },
           startedAt,
-        });
+        };
+
+        const outcome = method === 'mlkit' ? await runMlKit(input) : await runLocalOcr(input);
 
         results.push({ variant, recordError: outcome.recordError, error: outcome.attempt.error });
       }

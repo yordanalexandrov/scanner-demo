@@ -10,6 +10,8 @@ import {
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import type { Env } from './env.js';
 import type { Db } from './db/client.js';
+import { createLocalOcrEngine } from './engines/localOcr.js';
+import type { OcrEngine } from './engines/types.js';
 import { InvalidImagePathError } from './lib/imagePaths.js';
 import authPlugin from './plugins/auth.js';
 import multipartPlugin from './plugins/multipart.js';
@@ -17,10 +19,17 @@ import { createAttemptRoutes } from './routes/attempts.js';
 import { createBarcodeScanRoutes } from './routes/barcodeScans.js';
 import { healthRoutes } from './routes/health.js';
 import { createImageRoutes } from './routes/images.js';
+import { createOcrRoutes } from './routes/ocr.js';
 
 export interface BuildServerOptions {
   env: Env;
   db: Db;
+  /**
+   * The self-hosted engine, injectable so a test can stand a stub in front of the route without a
+   * container. The process builds the real one from the environment - phases 08 and 09 add theirs
+   * beside it, behind the same interface.
+   */
+  localOcrEngine?: OcrEngine;
 }
 
 /**
@@ -29,6 +38,13 @@ export interface BuildServerOptions {
  */
 export async function buildServer(options: BuildServerOptions): Promise<FastifyInstance> {
   const { env, db } = options;
+
+  const localOcrEngine =
+    options.localOcrEngine ??
+    createLocalOcrEngine({
+      baseUrl: env.OCR_SIDECAR_URL,
+      timeoutMs: env.OCR_SIDECAR_TIMEOUT_MS,
+    });
 
   fs.mkdirSync(env.imageDir, { recursive: true });
   fs.mkdirSync(env.thumbDir, { recursive: true });
@@ -90,6 +106,7 @@ export async function buildServer(options: BuildServerOptions): Promise<FastifyI
   await fastify.register(createImageRoutes({ db, imageDir: env.imageDir, thumbDir: env.thumbDir }));
   await fastify.register(createBarcodeScanRoutes({ db }));
   await fastify.register(createAttemptRoutes({ db }));
+  await fastify.register(createOcrRoutes({ db, imageDir: env.imageDir, engine: localOcrEngine }));
 
   return fastify;
 }

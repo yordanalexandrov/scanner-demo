@@ -72,7 +72,7 @@ four once the remaining engines exist, so it blocks 07 rather than following it.
 | [05](05-capture-mlkit.md) | Expiry capture, on-device OCR, date parser | complete | Capture, two variants, parser tests |
 | [06](06-library.md) | Image library | complete | Grid, filters, additive re-runs |
 | [06b](06b-parser-and-timing-fixes.md) | Parser and timing corrections | complete | Recorded-block fixtures, re-runs, method totals that reconcile |
-| [07](07-ocr-sidecar.md) | Self-hosted OCR sidecar | not started | **Two stops:** spike report, then build-out |
+| [07](07-ocr-sidecar.md) | Self-hosted OCR sidecar | stage A complete; stage B awaiting on-box verification | **Two stops:** spike report, then build-out |
 | [08](08-gcv.md) | Google Cloud Vision engine | not started | GCV over existing library images |
 | [09](09-vlm.md) | VLM engine | not started | Model answer vs parser answer, provider swap |
 | [10](10-history.md) | History and JSON export | not started | The POC's actual deliverable |
@@ -86,6 +86,31 @@ its segments accounting for `Total 99.7 ms` to within 2.7 ms. Criterion 7's "a f
 not prevent the others" is only partly exercised while `mlkit` is the sole available method; phase 07 is
 the first that can show it. That session also found the `<Image>` header bug now recorded in
 [ADR-14](../decisions.md#adr-14--shared-package-build-and-thumbnail-authentication).
+
+Phase 07 stage B was verified on 2026-07-31 against the real container, but **on a 32-core
+workstation rather than on the deployment box**, because this session had no shell on the box. What
+that run establishes is everything that is a property of the code and the container: the sidecar
+holds no published ports and is unreachable from the host while the server reaches it over the
+internal network; `docker compose config` pins it by `@sha256:` and `:latest` appears nowhere; the
+image volume mounts `:ro` and a write inside fails; the sidecar, running as UID 1000, reads back a
+file a real upload had just written; `POST /api/v1/ocr/local` returns a response that validates
+against `ocrResponseSchema`, and `{"imageId":"../../etc/passwd"}` returns 400 with the engine never
+called; a `docker compose pause` produced **504 at 30.005 s**, the configured limit, rather than a
+hang; `cpu.max` is `150000 100000` and `memory.max` 1 GiB, with peak CPU at the cap and peak
+`VmHWM` 615 MiB on the upload variant. Twenty consecutive warm requests gave a median `engineMs` of
+578.3 ms with **IQR ÷ median = 5.7 %**, inside criterion 13's 20 %, and the first request after a
+sidecar restart cost 831 ms against that median.
+
+**Three criteria are not met by that run and need the box.** Criterion 13's figures and criterion 15's
+"the production Supabase containers stay healthy" are only meaningful on the two-core box under
+co-tenancy — the workstation numbers are quoted in the README as shape, not as benchmark. Criterion
+17 asks for the phase 05–06 Library images; the local volume holds only synthetic images from earlier
+local runs, and the real dataset lives on the box. Criterion 16 needs the app on a handset: the
+Self-hosted button is enabled and wired, and no attempt row has been produced from a device yet.
+
+Stage B also turned up a limit the spike did not reach, now in the README: peak resident memory is
+615 MiB on the 1200×1600 upload variant but **929 MiB on a 6000×4500 original**, against a 1 GiB
+`mem_limit` that `MAX_UPLOAD_BYTES` permits images to exceed.
 
 ## Global constraints
 

@@ -9,9 +9,9 @@ import { colors, radius, spacing } from '../theme';
  * methods are meant to be evaluated one at a time and watched while they run; a batch action
  * appears once the methods have been evaluated separately, in the Library, in phase 06.
  *
- * The three server methods are present but disabled, each naming the phase that turns it on. Absent
- * buttons would leave the screen looking finished when it is not, and would hide the fact that the
- * comparison is a comparison of four.
+ * The server methods that have no phase yet are present but disabled, each naming the phase that
+ * turns it on. Absent buttons would leave the screen looking finished when it is not, and would
+ * hide the fact that the comparison is a comparison of four.
  */
 
 export interface MethodDescriptor {
@@ -23,7 +23,7 @@ export interface MethodDescriptor {
 
 export const METHODS: readonly MethodDescriptor[] = [
   { method: 'mlkit', label: 'ML Kit · on-device', unavailable: null },
-  { method: 'onnx-paddleocr', label: 'Self-hosted OCR', unavailable: 'Phase 07' },
+  { method: 'onnx-paddleocr', label: 'Self-hosted OCR', unavailable: null },
   { method: 'gcv', label: 'Google Cloud Vision', unavailable: 'Phase 08' },
   { method: 'vlm', label: 'VLM', unavailable: 'Phase 09' },
 ];

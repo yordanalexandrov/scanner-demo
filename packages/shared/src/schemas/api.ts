@@ -60,8 +60,15 @@ const queryBooleanSchema = z.enum(['true', 'false']).transform((value) => value 
  * date filter means to someone looking at the library. Pagination, by contrast, orders on
  * `createdAt`: that one is server-assigned and cannot be backdated by a gallery import, so it is
  * the only field a stable cursor can be built on.
+ *
+ * **Strict, so an unknown parameter is an error rather than a stripped one** - phase 07 item 22.
+ * A plain `z.object` drops what it does not recognise, which against a server older than the app
+ * turns every new filter into a silent no-op: verified on 2026-07-30, a server five commits behind
+ * answered an unknown filter with a full page of rows and the grid looked like it was filtering.
+ * A filter that lies is worse than one that fails, and the upload metadata is strict for the same
+ * reason - ADR-3.
  */
-export const imageListQuerySchema = z.object({
+export const imageListQuerySchema = z.strictObject({
   limit: z.coerce.number().int().min(1).max(IMAGE_LIST_MAX_LIMIT).default(IMAGE_LIST_DEFAULT_LIMIT),
   cursor: z.string().min(1).optional(),
   source: imageSourceSchema.optional(),
