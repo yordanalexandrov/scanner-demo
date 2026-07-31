@@ -7,8 +7,9 @@
  * the repository root names the exact API and rejects it.
  *
  * A duration is only meaningful against the clock that produced it. `totalMs` is measured entirely
- * on the phone; `engineMs` and `serverTotalMs` are measured entirely on the server. Nothing from one
- * clock is ever subtracted from the other - ADR-10.
+ * on the phone from one method invocation; capture cost is separate under ADR-22. `engineMs` and
+ * `serverTotalMs` are measured entirely on the server. Nothing from one clock is ever subtracted
+ * from the other - ADR-10.
  */
 
 export type ClockSource = 'hrtime' | 'performance';

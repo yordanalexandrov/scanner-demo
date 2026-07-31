@@ -39,14 +39,16 @@ graph TD
   P03 --> P04[04 · Barcode scan]
   P04 --> P05[05 · Capture, on-device OCR, parser]
   P05 --> P06[06 · Image library]
+  P06 --> P06B[06b · Parser and timing corrections]
   P02 --> P07[07 · Self-hosted OCR sidecar]
-  P06 --> P07
-  P06 --> P08[08 · Google Cloud Vision]
-  P06 --> P09[09 · VLM]
+  P06B --> P07
+  P06B --> P08[08 · Google Cloud Vision]
+  P06B --> P09[09 · VLM]
   P07 --> P08
   P07 --> P09
   P05 --> P10[10 · History and export]
   P06 --> P10
+  P06B --> P10
   P07 --> P10
   P08 --> P10
   P09 --> P10
@@ -56,6 +58,11 @@ Phase 06 sits before the three engine phases on purpose: once a library of store
 engine added afterwards is tested against images already collected instead of packaging being re-shot for
 each one. Phase 07 precedes 08 and 09 because it introduces the `OcrEngine` interface they both implement.
 
+Phase 06b was not in the original plan. It was inserted after the phase 05/06 dataset turned up two
+defects in code all four methods share — a date parser that discards correctly recognised dates, and a
+`totalMs` that measures the operator rather than the method. Both are cheap to fix now and multiply by
+four once the remaining engines exist, so it blocks 07 rather than following it.
+
 | # | Phase | Status | Stop for review |
 |---|---|---|---|
 | [01](01-scaffold.md) | Scaffold and shared contracts | complete | Schemas, CI, secret hook |
@@ -64,6 +71,7 @@ each one. Phase 07 precedes 08 and 09 because it introduces the `OcrEngine` inte
 | [04](04-barcode.md) | Barcode scan screen | complete | Live decode + recorded latency |
 | [05](05-capture-mlkit.md) | Expiry capture, on-device OCR, date parser | complete | Capture, two variants, parser tests |
 | [06](06-library.md) | Image library | complete | Grid, filters, additive re-runs |
+| [06b](06b-parser-and-timing-fixes.md) | Parser and timing corrections | in progress | Recorded-block fixtures, re-runs, method totals that reconcile |
 | [07](07-ocr-sidecar.md) | Self-hosted OCR sidecar | not started | **Two stops:** spike report, then build-out |
 | [08](08-gcv.md) | Google Cloud Vision engine | not started | GCV over existing library images |
 | [09](09-vlm.md) | VLM engine | not started | Model answer vs parser answer, provider swap |
@@ -110,6 +118,7 @@ they are constraints rather than work, repeated in the Global constraints table 
 | `packages/shared`: `OcrResponse` shape, zod schemas, one definition imported by both sides | [01](01-scaffold.md) |
 | TypeScript strict mode everywhere | [01](01-scaffold.md) |
 | Versioned price table ([ADR-11](../decisions.md#adr-11--cost-estimates-come-from-a-versioned-price-table)); real prices filled in by [08](08-gcv.md), [09](09-vlm.md) | [01](01-scaffold.md) |
+| Versioned parser and timing semantics on every attempt, including legacy-row backfill | [06b](06b-parser-and-timing-fixes.md) |
 | Shared monotonic timing helpers ([ADR-10](../decisions.md#adr-10--latency-segments-clocks-and-what-may-be-subtracted)) | [01](01-scaffold.md) |
 | CI lint | [01](01-scaffold.md) |
 | README, `.env.example` | [01](01-scaffold.md) |
@@ -200,9 +209,9 @@ they are constraints rather than work, repeated in the Global constraints table 
 |---|---|
 | `packages/shared/src/dateParser.ts` with unit tests, imported by both sides | [05](05-capture-mlkit.md) |
 | Methods 1–3 parsed by this one module, so accuracy differences are attributable to the OCR | [05](05-capture-mlkit.md) |
-| Anchor list, including the Bulgarian phrases | [01](01-scaffold.md) (data), [05](05-capture-mlkit.md) (matching) |
+| Anchor list, including the Bulgarian phrases | [01](01-scaffold.md) (data), [05](05-capture-mlkit.md) (matching), [06b](06b-parser-and-timing-fixes.md) (the German phrase as printed) |
 | Format list (`DD.MM.YYYY` … `DD MMM YYYY`) | [05](05-capture-mlkit.md) |
-| Disambiguation rules 1–4 | [05](05-capture-mlkit.md), governed by [ADR-6](../decisions.md#adr-6--parser-rule-order-and-referencedate)–[ADR-8](../decisions.md#adr-8--month-only-dates-resolve-to-the-last-day-with-a-precision-field) and [ADR-16](../decisions.md#adr-16--separators-and-year-widths-are-normalised-before-matching) |
+| Disambiguation rules 1–4 | [05](05-capture-mlkit.md), corrected in [06b](06b-parser-and-timing-fixes.md); governed by [ADR-6](../decisions.md#adr-6--parser-rule-order-and-referencedate)–[ADR-8](../decisions.md#adr-8--month-only-dates-resolve-to-the-last-day-with-a-precision-field), [ADR-16](../decisions.md#adr-16--separators-and-year-widths-are-normalised-before-matching) and [ADR-21](../decisions.md#adr-21--candidate-boundaries-and-the-order-of-the-sanity-window) |
 | Every engine adapter returns `blocks: [{ text, bbox, confidence }]` | [05](05-capture-mlkit.md), [07](07-ocr-sidecar.md)–[09](09-vlm.md); nullability per [ADR-4](../decisions.md#adr-4--bbox-is-nullable-and-the-parser-records-which-rule-decided), [ADR-5](../decisions.md#adr-5--bbox-format-and-confidence-nullability) |
 | Return a confidence score and always surface it; never silently guess | [05](05-capture-mlkit.md) |
 | VLM returns both its structured answer and its raw text; record both, and parse the raw text too | [09](09-vlm.md) |
@@ -233,3 +242,4 @@ Not blocking this plan, but blocking the phases they belong to.
 | `scanner.yo-po.eu` must resolve to `167.235.146.155` before certbot can issue a certificate — an `A` record at the registrar. | [02](02-server-images.md) | resolved 2026-07-30 — the record is in place and the vhost serves over TLS |
 | Local `expo run:android` (needs the Android SDK here) or EAS cloud builds (needs an Expo account)? | [03](03-app-shell.md) | resolved 2026-07-30 — local `expo run:android` against an attached device |
 | SSH access to the deployment box, and who deploys. | [02](02-server-images.md) | resolved 2026-07-28 — see [deployment-target.md](../deployment-target.md) |
+| Does `totalMs` start at the shutter with an explicit operator-wait segment, or at the method invocation with the capture cost reported alongside? [ADR-22](../decisions.md#adr-22--totalms-starts-at-the-method-invocation) recommends the latter. | [06b](06b-parser-and-timing-fixes.md), and every latency figure after it | resolved 2026-07-31 — the owner authorised the method-invocation design |

@@ -34,19 +34,11 @@ export interface CaptureSource {
   torch: boolean | null;
   /** `null` for a gallery import, which had no capture to time - ADR-10. */
   captureMs: Millis | null;
-  /** When the user-visible action began - the shutter, or the moment the picker returned. */
-  startedAt: Millis;
 }
 
 export interface StoredCapture {
   imageId: string;
   captureGroupId: string;
-  /**
-   * The instant the shutter fired, from `now()`. `totalMs` is measured from here rather than from
-   * the method button, because the user-visible action begins at the shutter - ADR-10. Without it
-   * the total would sit on screen underneath segments that add up to several times its own value.
-   */
-  startedAt: Millis;
   /** The uploaded, downscaled variant - the bytes every engine will be compared on. */
   upload: { uri: string; width: number; height: number };
   /** The untouched capture, or `null` when the source was already inside the target size. */
@@ -147,7 +139,6 @@ export async function storeCapture(source: CaptureSource): Promise<StoredCapture
   return {
     imageId: uploaded.value.imageId,
     captureGroupId,
-    startedAt: source.startedAt,
     upload: { uri: downscaled.uri, width: downscaled.width, height: downscaled.height },
     original: downscaled.resized
       ? { uri: source.uri, width: downscaled.sourceWidth, height: downscaled.sourceHeight }

@@ -36,6 +36,8 @@ had to resolve to be executable. One record per decision.
 | [18](#adr-18--the-benchmark-shares-the-box-with-production) | The benchmark shares the box with production | Accepted | 02, 07, 10 |
 | [19](#adr-19--vision-camera-is-pinned-to-v4-and-the-android-project-is-generated) | vision-camera pinned to v4; Android project generated, not committed | Accepted | 03, 04, 05 |
 | [20](#adr-20--a-capture-group-has-one-anchor-row-and-the-librarys-filters-read-the-group) | One anchor row per capture group; group-scoped Library filters | Accepted | 06, 10 |
+| [21](#adr-21--candidate-boundaries-and-the-order-of-the-sanity-window) | Candidate boundaries; sanity window filters before the rule | Accepted | 06b, amends 6 and 16 |
+| [22](#adr-22--totalms-starts-at-the-method-invocation) | `totalMs` starts at the method invocation | Accepted | 06b, amends 10 |
 
 **Rule names, not rule numbers.** The specification numbers its disambiguation rules 1–4;
 [ADR-6](#adr-6--parser-rule-order-and-referencedate) inserts extraction as a step and renumbers them. To
@@ -269,7 +271,8 @@ parseExpiryDate(blocks: Block[], opts: { referenceDate: Date }): ParseResult
    list, so `01/03/27` is unambiguously `DD/MM/YY`.
 6. **Sanity window,** applied last and only to the chosen expiry candidate: discard if more than 10 years
    after or more than 10 years before `referenceDate`. See ADR-7 for what happens to dates merely in the
-   past.
+   past. **Amended by [ADR-21](#adr-21--candidate-boundaries-and-the-order-of-the-sanity-window):** the
+   window filters candidates immediately after extraction, before any deciding rule runs.
 
 `referenceDate` needs a defined source for images that were not captured by this app.
 `ImageRecord.capturedAtSource` records it: `camera` for a capture, `exif` when a gallery import carries
@@ -384,7 +387,9 @@ specification also asks for the sidecar's process boundary to be measured separa
 - All durations use `performance.now()` on the phone and `process.hrtime.bigint()` on the server.
   `Date.now()` is used only for wall-clock timestamps that are ordered, never subtracted.
 - **`totalMs` is measured entirely on the phone**, from the start of the user-visible action to the
-  parsed result. It is a single-clock measurement.
+  parsed result. It is a single-clock measurement. **Amended by
+  [ADR-22](#adr-22--totalms-starts-at-the-method-invocation):** it starts at the invocation of the method,
+  and the capture segments are reported alongside it rather than inside it.
 - The server reports two figures inside every `OcrResponse`:
   - `engineMs` — time inside the recognition engine itself.
   - `serverTotalMs` — wall time inside the Fastify handler.
@@ -395,8 +400,10 @@ specification also asks for the sidecar's process boundary to be measured separa
   fields — `timing.requestMs` (the phone's round trip) minus `ocr.serverTotalMs` — labelled as such and
   never presented as a precise figure. Both operands are persisted, so the estimate can be recomputed
   from the export rather than existing only on screen.
-- Every segment the phone can observe is a stored field, so `totalMs` has no unexplained remainder:
-  `captureMs`, `downscaleMs`, `uploadMs`, `downloadMs` (re-runs only), `requestMs` and `parseMs`.
+- Every segment the phone can observe is a stored field. Under ADR-22, `captureMs`, `downscaleMs` and
+  `uploadMs` form the capture cost outside `totalMs`; the applicable method-side fields —
+  `downloadMs`, `requestMs`, `parseMs`, and ML Kit's local `engineMs` — account for `totalMs` without
+  double-counting server fields already nested inside `requestMs`.
 - `engineMs` is not equally meaningful across engines, so every `OcrResponse` declares its scope:
   `engineMsScope: "inference" | "inference+network"`. The sidecar and ML Kit report `inference`; GCV and
   the VLM report `inference+network`, because their SDKs expose no way to separate the two. Any chart
@@ -594,7 +601,9 @@ year. Real packaging mixes separators and year widths freely.
 **Decision.** The list is read as a set of **component patterns**, not eight literal strings. Before
 matching, the parser normalises:
 
-- **Separators** `.`, `/`, `-` and a single space are equivalent.
+- **Separators** `.`, `/`, `-` and a single space are equivalent. **A line break is not a separator** —
+  [ADR-21](#adr-21--candidate-boundaries-and-the-order-of-the-sanity-window), which tightens this from the
+  whitespace class the implementation first used.
 - **Year width** is either two or four digits in any pattern that has a year. A two-digit year resolves
   into the century that places it within the sanity window of ADR-6.
 - The unseparated `DDMMYY` form stays a distinct pattern, since it has no separator to normalise.
@@ -796,3 +805,149 @@ withdrawn — but then the `variant=original` view of the Library has no usable 
 it entails. The per-row alternative was put alongside it and rejected: it either splits a
 `(method, inputVariant)` group's medians across two rows, or forces the attempts endpoint to be keyed by
 capture group instead — which is this decision reached by a longer route.
+
+---
+
+## ADR-21 — Candidate boundaries and the order of the sanity window
+
+**Context.** Collecting the phase 05/06 dataset on 2026-07-30 produced two failures that belong to the
+parser rather than to any engine, both reproducible from the exact blocks recorded during that session.
+The pesto row remains in the production database; the original Nurofen row was removed later, so its
+block is preserved in the phase 06b evidence and regression fixture:
+
+| Recorded block | Printed on the package | Parsed |
+|---|---|---|
+| `"62H24\n07/2027"` | `Годен до: 07/2027` | `2027-07-24`, day precision, confidence 0.95 |
+| `"L6152 21:05:18\n01/12/2026"` | `01/12/2026` | `2012-01-18`, then discarded |
+
+Both have the same first cause. The separator class from
+[ADR-16](#adr-16--separators-and-year-widths-are-normalised-before-matching) is written `[./\-\s]`, and
+`\s` matches a line break. Every OCR engine joins the lines of one text block with `\n`, so the trailing
+digits of a lot number or a time stamp on the line above become the day of the date below. The prose of
+ADR-16 says "a single space"; the character class says something wider, and the wider reading is the one
+that ran.
+
+The pesto case has a second cause that survives fixing the first. With the date correctly extracted as
+`2026-12-01`, the block set still contains the noise string `8.54`, which the two-component pattern reads
+as `2054-08-31`. [ADR-6](#adr-6--parser-rule-order-and-referencedate) applies the sanity window at step 6,
+"last and only to the chosen expiry candidate", so `latest-of-pair` picks the year 2054 — it is genuinely
+later — and the window then discards it. The real date was never considered.
+
+**Decision.** Two amendments to the parser's rules.
+
+1. **A candidate may not span a line break.** The separators are `.`, `/`, `-` and a single space, as
+   ADR-16's prose always said. Line breaks, tabs and every other whitespace character terminate a
+   candidate. This narrows the character class, not the format list.
+
+2. **The sanity window filters candidates before the deciding rule, not after.** It moves from step 6 to
+   step 1b, immediately after extraction. Implausible candidates never reach `anchor-proximity`,
+   `latest-of-pair` or `sole-candidate`, and are still reported in `ParseResult.candidates` with a
+   `rejectedFor` naming the window.
+
+A consequence of changing the parser at all: attempt rows gain **`parserVersion`**, a literal in
+`packages/shared` bumped whenever a parsing rule changes, stored on every row and carried into the export,
+following the same versioned-record principle as `pricingVersion` under
+[ADR-11](#adr-11--cost-estimates-come-from-a-versioned-price-table).
+The migration assigns the existing rows a stable legacy value and new rows the current value; it does not
+re-parse or rewrite their recorded payloads.
+
+**Rationale.** The harness attributes accuracy differences to the OCR. A parser artefact does the
+opposite: it hits whichever engine happened to read the surrounding text well, which is the confound
+ADR-16 was written to avoid, and it does so silently — the wrong Nurofen date carried a *higher*
+confidence than the correct one, because a spurious day looks more precise than an honest month.
+
+The reordering follows from what the window is for. It marks a candidate as OCR noise. A rule that lets
+noise win before the noise check runs is not a disambiguation rule; the window belongs where the
+candidate set is built, not where the answer is announced.
+
+`parserVersion` is not optional bookkeeping. Without it the dataset mixes results from two parsers with no
+way to tell them apart, and a re-run recorded after this change is indistinguishable from one recorded
+before it — which is the exact failure mode ADR-11 introduced `pricingVersion` to prevent for costs.
+
+**Consequences.** A genuine expiry more than ten years out is now dropped before the rule rather than
+chosen and then rejected. It remains in `candidates` with its reason, so the export still shows it, but it
+is no longer reported as "the date we would have chosen". No such date has appeared in the dataset.
+
+Results already recorded are not re-parsed — the dataset is append-only. A corrected result comes from a
+Library re-run, and `parserVersion` is what makes the two generations comparable rather than merged. Any
+aggregate that spans this change must group by it.
+
+Tests take their fixtures from blocks a real engine actually emitted. Neither defect was reachable from
+hand-written input, because neither hand-written fixture contained a line break inside a block.
+
+**Status.** Accepted 2026-07-31 — the owner authorised phase 06b with the parser correction described
+above.
+
+---
+
+## ADR-22 — `totalMs` starts at the method invocation
+
+**Context.** [ADR-10](#adr-10--latency-segments-clocks-and-what-may-be-subtracted) defines `totalMs` as
+running "from the start of the user-visible action to the parsed result", and requires that the stored
+segments leave it with no unexplained remainder. In the implementation the user-visible action is the
+shutter, but a method only runs when one of the four method buttons is pressed — so the interval between
+them, during which the operator is looking at the frozen preview, is inside the figure. The dataset
+collected on 2026-07-30 shows what that costs, against an `engineMs` of 93–249 ms:
+
+| Path | `totalMs` | Segments | Unexplained |
+|---|---|---|---|
+| camera capture, typical | 2 615 – 4 756 ms | 1 268 – 1 559 ms | 0.9 – 2.9 s |
+| gallery import (`f4f5efb9`) | 39 424 ms | 674 ms | 38.8 s — the picker was open |
+| second run, same capture (`06dce108`) | 70 186 ms | 1 651 ms | the phone slept between presses |
+
+Three distinct paths into the same number. The gallery timer starts before `launchImageLibraryAsync` is
+called rather than when it returns, so browsing is measured. A second run reuses the stored capture's
+`startedAt`, so everything since the shutter accumulates — and because `performance.now()` on Android does
+not advance during deep sleep, that figure is not even wall time. And on the ordinary camera path the
+remainder is simply the operator, which ADR-10 forbids by requiring no unexplained remainder.
+
+**Decision.** `totalMs` is measured **from the invocation of the method to the parsed result**, on every
+path and for every method. The capture-side segments — `captureMs`, `downscaleMs`, `uploadMs` — continue
+to be measured and stored exactly as now, and are presented as the **capture cost**, outside every method
+total and every method-latency median. That shared cost is shown once for the capture rather than repeated
+as though every method paid it; when no capture-side segment applies, its derived display value is `null`,
+not zero.
+
+"Invocation" is per recorded attempt, not merely per button callback. The ML Kit button records
+`upload` and `original` attempts sequentially; each receives a fresh monotonic start immediately before
+its own work, so the second total never contains the first attempt's inference.
+
+`captureMs + downscaleMs + uploadMs + totalMs` is still useful, but it is a **machine-path cost**, not
+literal end-to-end elapsed time: it deliberately excludes the interval between the completed upload and
+the method press. It may be computed for display and export, is labelled with that exclusion, and is
+never stored as another timing field. Preserving literal shutter-to-result elapsed would require the
+`handoffMs` alternative below.
+
+Each attempt also records a non-null **`timingVersion`**. Existing rows are backfilled with a stable
+legacy value and post-change rows carry the new value. `parserVersion` cannot serve as a proxy for timing
+semantics merely because both first appear in phase 06b, and no `totalMs` median may span timing versions.
+
+**Rationale.** The comparison this project exists to make is between four methods over one stored image.
+Each is invoked by its own button press, so any interval before that press is attributable to the
+operator, not to the method — and it varies between methods for reasons that have nothing to do with
+them. A median over such totals ranks the methods by how long their button was stared at.
+
+The upload of the capture belongs to none of the four methods. It happens once, at capture, and every
+method reads the image the server already holds. Charging it to the on-device path — the only method that
+runs before any server request — would make the one local method look like the slowest.
+
+The rejected alternative is to keep `totalMs` starting at the shutter and add an explicit `handoffMs`
+segment covering the wait for the button. It satisfies ADR-10's no-remainder rule and keeps a
+literal end-to-end reading, and it was rejected because the resulting `totalMs` still has a human inside
+its median, so every chart drawn from it needs the same subtraction performed by hand — and the 70-second
+row above shows what happens when someone forgets.
+
+**Consequences.** `totalMs` values recorded before this change are not comparable with values recorded
+after it, on any path. `timingVersion` makes that boundary explicit; dates and the unrelated
+`parserVersion` do not. The Library keeps attempts visually grouped by `(method, inputVariant)` but
+summarises legacy and current timing cohorts separately.
+
+`StoredCapture.startedAt` stops feeding any measurement and the capture flow no longer needs to hold a
+timestamp across a screen. `CaptureScreen`'s gallery path no longer needs the picker to be timed at all,
+which removes the discrepancy between `CaptureSource.startedAt`'s documented meaning — "the moment the
+picker returned" — and what the code does with it.
+
+The result view gains a line: the capture cost, shown next to the total rather than summed into it. The
+machine-path sum may be shown too, provided it says that the operator interval is excluded.
+
+**Status.** Accepted 2026-07-31 — the owner chose method-invocation timing when authorising phase 06b.

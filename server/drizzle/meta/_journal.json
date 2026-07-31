@@ -29,6 +29,13 @@
       "when": 1785407993538,
       "tag": "0003_chunky_piledriver",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1785481922145,
+      "tag": "0004_motionless_raider",
+      "breakpoints": true
     }
   ]
 }

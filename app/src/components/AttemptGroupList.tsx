@@ -1,6 +1,6 @@
 import { StyleSheet, Text, View } from 'react-native';
 import { groupAttempts } from '@scanner-demo/shared';
-import type { Attempt, AttemptGroup } from '@scanner-demo/shared';
+import type { Attempt, AttemptGroup, AttemptSummaryCohort } from '@scanner-demo/shared';
 import { formatMs, formatTimestamp } from '../format';
 import { colors, radius, spacing } from '../theme';
 
@@ -62,6 +62,38 @@ function Run({ attempt }: { attempt: Attempt }) {
         engine {formatMs(attempt.timing.engineMs)} · parse {formatMs(attempt.timing.parseMs)} ·
         download {formatMs(attempt.timing.downloadMs)}
       </Text>
+      <Text style={styles.caption}>
+        {attempt.parserVersion} · {attempt.timingVersion}
+      </Text>
+    </View>
+  );
+}
+
+function Cohort({ cohort }: { cohort: AttemptSummaryCohort }) {
+  return (
+    <View style={styles.cohort}>
+      <View style={styles.cohortHeader}>
+        <Text style={styles.cohortVersion}>
+          {cohort.parserVersion} · {cohort.timingVersion}
+        </Text>
+        <Text style={styles.runCount}>
+          {cohort.runCount} run{cohort.runCount === 1 ? '' : 's'}
+        </Text>
+      </View>
+
+      <View style={styles.medians}>
+        <Text style={styles.medianLabel}>median method total</Text>
+        <Text style={styles.medianValue}>{formatMs(cohort.medianTotalMs)}</Text>
+      </View>
+      <View style={styles.medians}>
+        <Text style={styles.medianLabel}>median engine</Text>
+        <Text style={styles.medianValue}>{formatMs(cohort.medianEngineMs)}</Text>
+      </View>
+
+      <Text style={styles.caption}>
+        {cohort.extractedCount} of {cohort.runCount} extracted a date
+        {cohort.failureCount > 0 ? ` · ${cohort.failureCount} failed` : ''}
+      </Text>
     </View>
   );
 }
@@ -74,23 +106,13 @@ function Group({ group }: { group: AttemptGroup }) {
           {group.method} · {group.inputVariant}
         </Text>
         <Text style={styles.runCount}>
-          {group.runCount} run{group.runCount === 1 ? '' : 's'}
+          {group.attempts.length} total run{group.attempts.length === 1 ? '' : 's'}
         </Text>
       </View>
 
-      <View style={styles.medians}>
-        <Text style={styles.medianLabel}>median total</Text>
-        <Text style={styles.medianValue}>{formatMs(group.medianTotalMs)}</Text>
-      </View>
-      <View style={styles.medians}>
-        <Text style={styles.medianLabel}>median engine</Text>
-        <Text style={styles.medianValue}>{formatMs(group.medianEngineMs)}</Text>
-      </View>
-
-      <Text style={styles.caption}>
-        {group.extractedCount} of {group.runCount} extracted a date
-        {group.failureCount > 0 ? ` · ${group.failureCount} failed` : ''}
-      </Text>
+      {group.cohorts.map((cohort) => (
+        <Cohort key={`${cohort.parserVersion}-${cohort.timingVersion}`} cohort={cohort} />
+      ))}
 
       {group.attempts.map((attempt) => (
         <Run key={attempt.id} attempt={attempt} />
@@ -133,6 +155,14 @@ const styles = StyleSheet.create({
   groupHeader: { alignItems: 'baseline', flexDirection: 'row', justifyContent: 'space-between' },
   method: { color: colors.text, fontSize: 15, fontWeight: '700' },
   runCount: { color: colors.textMuted, fontSize: 12 },
+  cohort: {
+    backgroundColor: colors.background,
+    borderRadius: radius.md,
+    gap: 2,
+    padding: spacing.sm,
+  },
+  cohortHeader: { alignItems: 'baseline', flexDirection: 'row', justifyContent: 'space-between' },
+  cohortVersion: { color: colors.text, fontFamily: 'monospace', fontSize: 12, fontWeight: '600' },
   medians: { flexDirection: 'row', justifyContent: 'space-between' },
   medianLabel: { color: colors.text, fontSize: 13 },
   medianValue: {

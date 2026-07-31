@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import { groupAttempts } from './attemptGroups.js';
+import { LEGACY_PARSER_VERSION, PARSER_VERSION } from './parserVersion.js';
 import type { Attempt } from './schemas/attempt.js';
 import type { ExpiryStatus } from './schemas/parse.js';
+import { LEGACY_TIMING_VERSION, TIMING_VERSION } from './timingVersion.js';
 
 /**
  * The grouping these tests defend is the one the specification asks for in the Library and History:
@@ -38,6 +40,8 @@ function attempt(overrides: Partial<Attempt> = {}): Attempt {
       totalMs: 100,
     },
     referenceDate: '2026-06-01',
+    parserVersion: PARSER_VERSION,
+    timingVersion: TIMING_VERSION,
     pricingVersion: 'unset',
     promptVersion: null,
     error: null,
@@ -70,7 +74,7 @@ describe('groupAttempts', () => {
     // The downscaled read and the full-resolution one stay apart. Averaged, they would report
     // 1500 ms as the typical on-device latency, which is true of neither variant.
     expect(groups.map((group) => group.inputVariant)).toEqual(['upload', 'original']);
-    expect(groups.map((group) => group.medianTotalMs)).toEqual([900, 2_100]);
+    expect(groups.map((group) => group.cohorts[0]?.medianTotalMs)).toEqual([900, 2_100]);
   });
 
   it('reports a median with the run count it was taken over', () => {
@@ -81,8 +85,8 @@ describe('groupAttempts', () => {
     ]);
 
     expect(groups).toHaveLength(1);
-    expect(groups[0]?.runCount).toBe(3);
-    expect(groups[0]?.medianTotalMs).toBe(200);
+    expect(groups[0]?.cohorts[0]?.runCount).toBe(3);
+    expect(groups[0]?.cohorts[0]?.medianTotalMs).toBe(200);
     // Every run is kept, not collapsed into the median - spec, § Screens — Image library.
     expect(groups[0]?.attempts).toHaveLength(3);
   });
@@ -96,9 +100,9 @@ describe('groupAttempts', () => {
       attempt({ error: 'ML Kit failed to read the image' }),
     ]);
 
-    expect(groups[0]?.runCount).toBe(3);
-    expect(groups[0]?.medianEngineMs).toBe(100);
-    expect(groups[0]?.failureCount).toBe(1);
+    expect(groups[0]?.cohorts[0]?.runCount).toBe(3);
+    expect(groups[0]?.cohorts[0]?.medianEngineMs).toBe(100);
+    expect(groups[0]?.cohorts[0]?.failureCount).toBe(1);
   });
 
   it('counts an expired date as an extraction - ADR-7', () => {
@@ -110,7 +114,49 @@ describe('groupAttempts', () => {
 
     // The engine read the date correctly and the product is old. Scoring that as a failure would
     // penalise whichever engine reads best on a dataset shot from real packaging.
-    expect(groups[0]?.extractedCount).toBe(2);
+    expect(groups[0]?.cohorts[0]?.extractedCount).toBe(2);
+  });
+
+  it('keeps one visual group but never mixes parser or timing semantics - ADR-21, ADR-22', () => {
+    const groups = groupAttempts([
+      attempt({
+        parserVersion: LEGACY_PARSER_VERSION,
+        timingVersion: LEGACY_TIMING_VERSION,
+        timing: { ...attempt().timing, totalMs: 70_000 },
+        parse: null,
+      }),
+      attempt({
+        parserVersion: PARSER_VERSION,
+        timingVersion: TIMING_VERSION,
+        timing: { ...attempt().timing, totalMs: 200 },
+        parse: parsed('valid'),
+      }),
+    ]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.attempts).toHaveLength(2);
+    expect(groups[0]?.cohorts).toHaveLength(2);
+    expect(
+      groups[0]?.cohorts.map((cohort) => ({
+        parserVersion: cohort.parserVersion,
+        timingVersion: cohort.timingVersion,
+        medianTotalMs: cohort.medianTotalMs,
+        extractedCount: cohort.extractedCount,
+      })),
+    ).toEqual([
+      {
+        parserVersion: LEGACY_PARSER_VERSION,
+        timingVersion: LEGACY_TIMING_VERSION,
+        medianTotalMs: 70_000,
+        extractedCount: 0,
+      },
+      {
+        parserVersion: PARSER_VERSION,
+        timingVersion: TIMING_VERSION,
+        medianTotalMs: 200,
+        extractedCount: 1,
+      },
+    ]);
   });
 
   it('orders groups by the declared method order, not by insertion order', () => {

@@ -20,9 +20,9 @@ import type { RunMethodResult } from './runMethod';
  *   would enter every average as a real measurement of a thing that did not occur.
  * - `downloadMs` is populated, and it is its own segment. Folding it into `uploadMs` would describe
  *   bytes leaving the phone when they were arriving.
- * - `totalMs` runs from the button press to the parsed result, on the phone's clock, so the
- *   segments still account for it: `downloadMs` + `engineMs` + `parseMs`, plus the sub-millisecond
- *   directory preparation below, which is inside the window because the operator waits for it too.
+ * - `totalMs` runs from the first method work to the parsed result, on the phone's clock, so the
+ *   segments still account for it: `downloadMs` + `engineMs` + `parseMs`, plus the directory
+ *   preparation below. No operator interval from the original capture is present - ADR-22.
  */
 
 export interface RerunInput {
@@ -73,7 +73,8 @@ function sweepStaleDownloads(directory: Directory): void {
 export async function rerunMlKit(input: RerunInput): Promise<RunMethodResult> {
   const { anchor, target } = input;
 
-  // The user-visible action begins with the press, and the download is part of what they wait for.
+  // Directory preparation and download are both attributable to this re-run, so the method starts
+  // immediately before either. The original capture's clock is deliberately unrelated - ADR-22.
   const startedAt = now();
 
   const directory = new Directory(Paths.cache, RERUN_TEMP_DIR);

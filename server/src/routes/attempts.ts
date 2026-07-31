@@ -67,6 +67,8 @@ function toRow(attempt: AttemptCreate, id: string, createdAt: number): NewAttemp
     costEstimateUsd: attempt.ocr?.costEstimateUsd ?? null,
 
     referenceDate: attempt.referenceDate,
+    parserVersion: attempt.parserVersion,
+    timingVersion: attempt.timingVersion,
     pricingVersion: attempt.pricingVersion,
     promptVersion: attempt.promptVersion,
     error: attempt.error,
@@ -101,6 +103,8 @@ function toAttempt(row: AttemptRow): Attempt {
     vlm: row.vlmJson === null ? null : JSON.parse(row.vlmJson),
     timing: JSON.parse(row.timingJson),
     referenceDate: row.referenceDate,
+    parserVersion: row.parserVersion,
+    timingVersion: row.timingVersion,
     pricingVersion: row.pricingVersion,
     promptVersion: row.promptVersion,
     error: row.error,

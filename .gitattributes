@@ -1,0 +1,3 @@
+# The phase 06 version of this file contained a literal NUL separator. Force a text diff while the
+# phase 06b change replaces it with the equivalent escaped form, so the semantic changes stay reviewable.
+packages/shared/src/attemptGroups.ts text diff

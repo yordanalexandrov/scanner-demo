@@ -200,3 +200,166 @@ describe('date parser - rules and geometry', () => {
     }
   });
 });
+
+const RECORDED_REFERENCE = new Date(Date.UTC(2026, 6, 30));
+
+const PESTO_BLOCKS: Block[] = [
+  { text: '8.54', bbox: [38, 1055, 363, 374], confidence: null },
+  { text: 'PESTO', bbox: [268, 1409, 579, 433], confidence: null },
+  { text: 'GENOVE', bbox: [458, 1658, 378, 275], confidence: null },
+  {
+    text: 'L6152 21:05:18\n01/12/2026',
+    bbox: [1339, 1214, 717, 858],
+    confidence: null,
+  },
+];
+
+const OIL_BLOCKS: Block[] = [
+  { text: 'DE-OKO- 003\nFU-Landwirtschaft', bbox: [346, 146, 611, 249], confidence: null },
+  { text: 'Hergestellt in Deutschland', bbox: [475, 331, 846, 178], confidence: null },
+  { text: 'Rapssaat aus der EU', bbox: [362, 495, 523, 137], confidence: null },
+  { text: 'VEGAN', bbox: [987, -8, 407, 102], confidence: null },
+  {
+    text: 'di-drogerie markt GmbH + Co. KG\nAm dm-Platz 1, DE-76227 Karlsruhe\nWWw.dm.de',
+    bbox: [358, 565, 953, 333],
+    confidence: null,
+  },
+  { text: 'Vertrieb in Österreich:', bbox: [381, 866, 557, 129], confidence: null },
+  {
+    text: 'dm drogerie markt, AT-S5071 Wals\nww.dm.at',
+    bbox: [378, 923, 882, 238],
+    confidence: null,
+  },
+  {
+    text: 'Trocken, vor Wärme und\nLicht geschützt lagern.\nMindestens haltbar bis:',
+    bbox: [392, 1166, 634, 296],
+    confidence: null,
+  },
+  { text: '329004', bbox: [406, 1627, 75, 219], confidence: null },
+  { text: 'GL', bbox: [1414, 705, 78, 49], confidence: null },
+  { text: '90', bbox: [1435, 882, 67, 78], confidence: null },
+  { text: 'C/ALU', bbox: [1366, 1036, 188, 54], confidence: null },
+  { text: '0,5le', bbox: [1104, 1232, 464, 225], confidence: null },
+  { text: '4 l0664447876383', bbox: [460, 2683, 1031, 106], confidence: null },
+  { text: '04-2503', bbox: [1506, 1554, 85, 268], confidence: null },
+];
+
+const YOGHURT_BLOCKS: Block[] = [
+  { text: 'a9-z nu', bbox: [-36, 527, 466, 620], confidence: null },
+  { text: 'KUceNO MAAKO', bbox: [992, 1241, 1362, 185], confidence: null },
+  { text: 'Bepe', bbox: [731, 1400, 1490, 540], confidence: null },
+  { text: 'ofPo,', bbox: [1252, 2231, 637, 169], confidence: null },
+  { text: '2,9%', bbox: [1340, 2530, 590, 343], confidence: null },
+  { text: 'Ogpd', bbox: [1204, 2974, 441, 233], confidence: null },
+  { text: 'TBe', bbox: [1745, 2759, 258, 296], confidence: null },
+  { text: 'Buk gamama.', bbox: [2422, 340, 506, 594], confidence: null },
+];
+
+const SNACK_BLOCKS: Block[] = [
+  { text: 'Rost', bbox: [-2, -2, 103, 79], confidence: null },
+  { text: '1504', bbox: [4, 2080, 318, 120], confidence: null },
+  { text: '2349', bbox: [1432, 59, 162, 107], confidence: null },
+  { text: '0,03g', bbox: [1428, 171, 168, 114], confidence: null },
+  {
+    text: 'Netokoqus: /Neto daudzums:\nGynasis kiekis/Netó tömeg/\nHerHO KOMVWYeCTBO:',
+    bbox: [730, 364, 809, 395],
+    confidence: null,
+  },
+  { text: '16.12.2026', bbox: [862, 1571, 774, 141], confidence: null },
+  { text: '00:22', bbox: [1009, 1955, 371, 107], confidence: null },
+  { text: 'WSABUPIAW', bbox: [1830, 24, 328, 145], confidence: null },
+  {
+    text: 'Parim enne:/Parti r/leteicams lidz/Geriausias ili\nPartijos Nr:/lLaikyi vésioje ir sausoje vietoje,/Bontta\ncsomagolásban, száraz, húvôs helyen tárolva mintsigét vo:\n(hap hónap/év-/HeorsopeN Hai- ao6sp ao,/laprnga:',
+    bbox: [732, 862, 1529, 550],
+    confidence: null,
+  },
+  { text: 'LDPEJPP', bbox: [2046, 303, 247, 120], confidence: null },
+  { text: '100 ge', bbox: [1731, 558, 665, 342], confidence: null },
+  { text: 'LPK100BGMU26006', bbox: [880, 1761, 1450, 135], confidence: null },
+  { text: 'A6', bbox: [1786, 1953, 192, 113], confidence: null },
+];
+
+describe('date parser - phase 06b recorded-block regressions', () => {
+  it('does not let a newline glue the Nurofen lot suffix onto its month-only date', () => {
+    const result = parseExpiryDate(textBlocks('62H24\n07/2027'), {
+      referenceDate: RECORDED_REFERENCE,
+    });
+
+    expect(result.expiry).toMatchObject({
+      date: '2027-07-31',
+      precision: 'month',
+      raw: '07/2027',
+    });
+  });
+
+  it('chooses the recognised pesto date after filtering implausible OCR noise', () => {
+    const result = parseExpiryDate(PESTO_BLOCKS, { referenceDate: RECORDED_REFERENCE });
+
+    expect(result.expiry?.date).toBe('2026-12-01');
+    expect(result.rule).toBe('sole-candidate');
+    expect(result.candidates).toEqual([
+      {
+        raw: '8.54',
+        date: '2054-08-31',
+        rejectedFor: 'more than 10 years from the reference date',
+      },
+      { raw: '01/12/2026', date: '2026-12-01', rejectedFor: null },
+    ]);
+    // The signal describes everything extracted for diagnostics, even though only one candidate
+    // was eligible to decide - ADR-21.
+    expect(result.confidence.signals).toContain('multiple-candidates');
+  });
+
+  it('does not invent the oil date that ML Kit failed to recognise', () => {
+    const result = parseExpiryDate(OIL_BLOCKS, { referenceDate: RECORDED_REFERENCE });
+
+    expect(result.expiry).toBeNull();
+    expect(result.candidates).toEqual([
+      {
+        raw: '04-2503',
+        date: '2503-04-30',
+        rejectedFor: 'more than 10 years from the reference date',
+      },
+    ]);
+  });
+
+  it('does not invent the yoghurt date when the recorded text has no candidate', () => {
+    const result = parseExpiryDate(YOGHURT_BLOCKS, { referenceDate: RECORDED_REFERENCE });
+
+    expect(result.expiry).toBeNull();
+    expect(result.candidates).toEqual([]);
+  });
+
+  it('keeps the already-correct snack result stable', () => {
+    const result = parseExpiryDate(SNACK_BLOCKS, { referenceDate: RECORDED_REFERENCE });
+
+    expect(result.expiry?.date).toBe('2026-12-16');
+    expect(result.rule).toBe('sole-candidate');
+  });
+
+  it('keeps a literal space and no separator, while tabs and newlines end a candidate', () => {
+    for (const value of ['05 MAR 2027', '31 12 2025', '05MAR27']) {
+      expect(parse(value).expiry).not.toBeNull();
+    }
+
+    for (const value of ['62H24\n07/2027', '62H24\t07/2027']) {
+      const result = parseExpiryDate(textBlocks(value), { referenceDate: RECORDED_REFERENCE });
+      expect(result.expiry?.date).toBe('2027-07-31');
+      expect(result.expiry?.raw).toBe('07/2027');
+    }
+  });
+
+  it('uses the full German anchor phrase case-insensitively with geometry', () => {
+    const result = parseExpiryDate(
+      [
+        { text: '15.01.2026', bbox: [10, 500, 120, 30], confidence: null },
+        { text: 'MINDESTENS HALTBAR BIS', bbox: [10, 100, 250, 30], confidence: null },
+        { text: '16.10.2026', bbox: [250, 100, 120, 30], confidence: null },
+      ],
+      { referenceDate: RECORDED_REFERENCE },
+    );
+
+    expect(result.rule).toBe('anchor-proximity');
+    expect(result.expiry?.date).toBe('2026-10-16');
+  });
+});
