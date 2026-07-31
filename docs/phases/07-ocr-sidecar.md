@@ -66,15 +66,17 @@ during stage A.
     cold-start figure is reported separately in the README and `engineMs` reflects steady state.
     — *spec § Gotchas*
 17. Engine adapter in the TS server behind a clean interface, producing a standard `OcrResponse` with
-    `engine: "onnx-paddleocr"` (or `onnx-paddleocr-cyrillic`), `engineMsScope: "inference"`,
-    `costEstimateUsd: 0`.
+    `engine: "onnx-paddleocr"`, `engineMsScope: "inference+network"` (item 19), `costEstimateUsd: 0`.
+    **`onnx-paddleocr-cyrillic` is deferred and not built in this phase** — reachable by configuration
+    but measurably worse on dates, decided at the stage A checkpoint on 2026-07-31.
+    — [ADR-12](../decisions.md#adr-12--the-self-hosted-engine-defaults-to-chineseenglish-models)
 18. `POST /api/v1/ocr/local` — `{ imageId }` → `OcrResponse`. The path is constructed from the image ID by
     the server; a client-supplied path never reaches a filesystem read.
     — *spec § Stack — Server*
 19. **`engineMs` is the whole sidecar call and says so.** ~~`engineMs` is time inside the container as it
     reports it; the difference from `serverTotalMs` is the process boundary.~~ **Amended at the stage A
     checkpoint on 2026-07-31:** the container reports no duration, and neither does any available
-    alternative — [the spike](../spikes/07-ocr-sidecar.md#9-the-stage-b-gate-there-is-no-inference-duration-and-no-alternative-that-has-one)
+    alternative — [the spike](../spikes/07-ocr-sidecar.md#the-stage-b-gate-there-is-no-inference-duration-and-no-alternative-that-has-one)
     records the search. So `engineMs` is the Fastify handler's own measurement of the HTTP call to the
     sidecar and `engineMsScope` is **`"inference+network"`**, not `"inference"`. `serverTotalMs` is still
     wall time inside the handler, but `serverTotalMs - engineMs` is now the handler's own overhead

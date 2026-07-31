@@ -35,7 +35,7 @@ on the box.
 | 6. Response contents | **Per-block quadrilateral + confidence**, so `anchor-proximity` *can* fire. It never did on this dataset — every parse was `sole-candidate` |
 | 7. Model / dictionary replacement | **Yes, by configuration alone** — three env vars and a read-only mount. The dictionary travels inside the `.onnx` |
 | 8. Thread controls | **No environment variables.** Threads only via a bind-mounted `config.yaml`; workers via the command line. **This is not optional on a many-core host** — see §8 |
-| 9. Mobile vs server models | **Mobile is already the default.** Server variants were later tested on bigger hardware and are 30–150× slower for no accuracy gain — §10 |
+| 9. Mobile vs server models | **Mobile is already the default.** Server variants were later tested on bigger hardware and are 30–150× slower for no accuracy gain — see "Would more hardware change any of this?" |
 
 **Cyrillic, stated plainly:** reachable through configuration alone — no Python, no rebuilt image, no
 internet at run time. **But it is worse at the job**, and by a margin that settles ADR-12: 7 of 10
@@ -51,9 +51,9 @@ all of them material. **A reader who takes 7/10 at face value will over-trust th
 - **The dataset is 5 distinct products, not 10.** Six of the ten photographs are the same Paracofdal
   box. By distinct product the score is **2 of 5**.
 - **Every failure is a dot-matrix date.** The three products that fail all carry inkjet dot-matrix
-  date codes; the ones that succeed carry continuous-glyph prints. See §7.
+  date codes; the ones that succeed carry continuous-glyph prints. See "Why the three failures are one failure".
 - **0 of 3 dot-matrix dates are read** — by this engine, by its server-variant models, by PaddleOCR
-  server, and by Tesseract with Bulgarian language data. Four independent attempts, §10.
+  server, and by Tesseract with Bulgarian language data. Four independent attempts — see "Would more hardware change any of this?".
 
 Dot-matrix is how expiry dates are actually applied to food packaging — stamped on the line, not
 printed with the artwork. So the figure that predicts real-world behaviour is the 0/3, not the 7/10.
@@ -316,7 +316,7 @@ Consequences for the adapter, each a real piece of stage B work:
 - **Errors have no JSON shape.** Corrupt input, a truncated JPEG and an empty POST all return HTTP 500
   with the plain string `Internal Server Error`. The adapter must treat any non-200 as an engine
   failure and cannot parse a body. `{}` with 200 is the distinct, legitimate "no text" case.
-- **There is no engine timing** — §9.
+- **There is no engine timing** — see the stage B gate section.
 
 ### Can `anchor-proximity` ever fire? Yes. Did it? No.
 
@@ -349,7 +349,7 @@ Cross-check: on `94530004` the stored on-device attempt recorded `expiry.date = 
 
 ---
 
-## 7. Why the three failures are one failure
+## Why the three failures are one failure
 
 Reading the parser's rejected candidates and then looking at the actual pixels turns three unrelated
 misses into a single, specific weakness.
@@ -366,6 +366,103 @@ dates that are easy to read and misses the ones that dominate real packaging.
 
 `2134860f` is worth separating out: it is out of focus and rotated. No engine fixes that, and it is
 an argument for capture guidance in the app rather than for a different OCR.
+
+---
+
+## 7. Replacing the model and the dictionary — yes, by configuration alone
+
+`rapidocr_api/main.py` reads three environment variables, all lowercase, and passes them to RapidOCR as
+`Det.model_path`, `Cls.model_path` and `Rec.model_path`:
+
+```python
+det_model_path = os.getenv("det_model_path", None)
+cls_model_path = os.getenv("cls_model_path", None)
+rec_model_path = os.getenv("rec_model_path", None)
+if det_model_path is None or cls_model_path is None or rec_model_path is None:
+    self.ocr = RapidOCR()
+```
+
+**All three or none** — setting only the recogniser silently changes nothing. The detection and
+classification paths can point at the models already inside the image.
+
+The catalogue the package ships (`rapidocr/default_models.yaml`) lists a Cyrillic recogniser, and
+`LangRec.CYRILLIC` is a first-class option in its type enum:
+
+```
+onnxruntime → PP-OCRv4 → rec:
+  arabic_… ch_… ch_doc_… chinese_cht_… cyrillic_PP-OCRv3_rec_infer.onnx  devanagari_…
+  en_… japan_… ka_… korean_… latin_PP-OCRv3_rec_infer.onnx  ta_… te_…
+```
+
+Downloaded on the host and checksum-verified against that catalogue:
+
+```
+$ curl -sSL -o cyrillic_PP-OCRv3_rec_infer.onnx \
+    https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.1.0/onnx/PP-OCRv4/rec/cyrillic_PP-OCRv3_rec_infer.onnx
+http=200 size=8972413
+$ sha256sum cyrillic_PP-OCRv3_rec_infer.onnx
+1efb65bdc460af1c0e8733d005b20952b17ca5aac10ddb56c968333791c5eaa3      # matches default_models.yaml
+```
+
+Mounted read-only and selected by environment variable, on an **internal network with no DNS and no
+route out**, to prove no run-time download is involved:
+
+```
+$ docker network create --internal spike-net
+$ docker run -d --name spike-ocr --network spike-net \
+    -v $HOME/spike-07/models:/models:ro \
+    -e det_model_path=…/ch_PP-OCRv4_det_infer.onnx \
+    -e cls_model_path=…/ch_ppocr_mobile_v2.0_cls_infer.onnx \
+    -e rec_model_path=/models/cyrillic_PP-OCRv3_rec_infer.onnx \
+    --memory=1g --cpus=1.5 qingchen0607/rapid-ocr-api@sha256:a1445b…
+
+$ docker exec spike-ocr sh -c 'getent hosts www.modelscope.cn || echo NO_DNS'
+NO_DNS
+$ docker logs spike-ocr | grep 'Using /'
+Using /usr/local/lib/python3.10/site-packages/rapidocr/models/ch_PP-OCRv4_det_infer.onnx
+Using /usr/local/lib/python3.10/site-packages/rapidocr/models/ch_ppocr_mobile_v2.0_cls_infer.onnx
+Using /models/cyrillic_PP-OCRv3_rec_infer.onnx
+
+$ curl http://127.0.0.1:9005/                       # from the host
+curl: (7) Failed to connect to 127.0.0.1 port 9005  # unreachable, as intended
+$ docker run --rm --network spike-net curlimages/curl -F image_file=@… http://spike-ocr:9005/ocr
+{"0":{"rec_txt":"ђођо",…}}                          → http=200
+```
+
+**No Python was written, the container was not opened, and it needs no internet.** Stage B's
+internal-only network is compatible with a swapped model, provided the `.onnx` is fetched at build or
+deploy time and mounted.
+
+**The dictionary needs no separate handling.** `rapidocr/ch_ppocr_rec/main.py` takes the character list
+from the ONNX model's own metadata when the engine is onnxruntime (`self.session.have_key()`), and only
+falls back to a `rec_keys_path` file for other engines. The dictionary travels inside the model file.
+`rapidocr_api` does not expose `rec_keys_path` at all, so this is fortunate rather than designed.
+
+### And yet the Cyrillic model should not be the default
+
+Same ten images, three model configurations, same parser:
+
+| Configuration | Images parsed to a date | Notes |
+| --- | --- | --- |
+| **PP-OCRv4 mobile ch/en (bundled default)** | **7 / 10** | Reads `07/2027` and `16.12.2026` cleanly |
+| PP-OCRv5 mobile ch (downloaded) | 3 / 10 | Reads `/` as `1` — `0712027` — on four images |
+| Cyrillic PP-OCRv3 (downloaded) | 1 / 10 | And that one is **wrong**: `18.12` where the date is `16.12.2026` |
+
+The failure mode is specific and consistent. On `94530004` the same date line reads:
+
+```
+v4 ch/en   "TOeHA0:07/2027"      → parses to 2027-07-31
+cyrillic   "oдeн 40. 0:+202?"    → nothing
+v5 ch      "ToneH AO:" "0712027" → nothing
+```
+
+The Cyrillic model does what it says — `Паpt.N` for «Парт.№» where the ch model gives `napT.No`, and
+`Heoвopeн най-дobp до` for «Неотворен най-добър до» — but it mangles digits, and digits are the entire
+measurement. PP-OCRv5 is both slower (median 2.622 s against 1.854 s) and less accurate here, so the
+newer version is not an upgrade for this task.
+
+**This settled ADR-12**, which had posed feasibility as the deciding question. Feasibility is a yes and
+it does not matter: `onnx-paddleocr-cyrillic` is deferred rather than built, on the measurement above.
 
 ---
 
@@ -424,7 +521,37 @@ this workload, but the sum is deliberate overcommit and belongs in the compose c
 
 ---
 
-## 9. The stage B gate: there is no inference duration, and no alternative that has one
+## 9. Mobile versus server models
+
+Already answered by the default configuration — the bundled models **are** the mobile ones:
+
+```yaml
+Det:  lang_type: "ch"   model_type: "mobile"   ocr_version: "PP-OCRv4"
+Rec:  lang_type: "ch"   model_type: "mobile"   ocr_version: "PP-OCRv4"
+```
+
+```
+$ docker exec spike-ocr ls -la …/rapidocr/models/
+ 4745517  ch_PP-OCRv4_det_infer.onnx          # mobile; the server variant is ~113 MB
+10857958  ch_PP-OCRv4_rec_infer.onnx          # mobile; the server variant is ~90 MB
+  585532  ch_ppocr_mobile_v2.0_cls_infer.onnx
+```
+
+The server variants are selectable the same way as the Cyrillic model — `model_type: server` in a
+mounted `config.yaml`, or a downloaded `*_server_infer.onnx` and the env vars of §7. They do not fit
+this box at 644 MiB resident for the mobile pair, so the specification's preference and ADR-18's
+constraint agree here.
+
+They were later tested on hardware that could hold them, and the answer is that nothing was being
+missed: **30–150× slower for no accuracy gain** — see "Would more hardware change any of this?" below.
+
+So phase 07 item 20 — "select the mobile models explicitly" — needs no code. It needs the model **names
+in the README** and a note that they are the image's defaults, so a future image change that quietly
+ships something else is visible as a difference rather than absorbed as noise.
+
+---
+
+## The stage B gate: there is no inference duration, and no alternative that has one
 
 The response carries no timing field. The **first run found the root cause**, which the second then
 verified line by line:
@@ -452,7 +579,7 @@ preserves ADR-10. **That option has since been closed by elimination:**
 - **`jarvis1tube/paddleocr-server`, the specification's named alternative, reports no timing either.**
   Pulled by digest and probed: every scalar path in the response was scanned for
   `time|elapse|duration|ms` — zero hits. It also **cannot run on this box**: `VmHWM` peaked at
-  **2.42 GB** against ~2.1 GB available with no swap and a live Postgres. §10.
+  **2.42 GB** against ~2.1 GB available with no swap and a live Postgres. See "Would more hardware change any of this?".
 - **Tesseract's HTTP server reports no timing either** — 07b.
 
 Two options went to the checkpoint:
@@ -470,7 +597,7 @@ prevents measuring the transport deliberately later; it simply is not part of st
 
 ---
 
-## 10. Would more hardware change any of this? No
+## Would more hardware change any of this? No
 
 Measured rather than assumed, on a 32-core / 62 GB / RTX 4080 workstation, same ten images, same
 parser.
@@ -530,7 +657,7 @@ ONNX threads left at the default **with a comment naming the two-core condition*
 
 **Two corrections the phase document needs**
 
-1. **Item 19 and ADR-10 on `engineMs`** — §9. The alternative has been eliminated, so this is now a
+1. **Item 19 and ADR-10 on `engineMs`** — see the stage B gate section. The alternative has been eliminated, so this is now a
    choice between two honest labellings, not a choice between fixing and fudging.
 2. **Item 12's "removes a pointless read-and-re-encode cycle" does not apply.** The engine cannot be
    given a path. The mount stays because the specification asks for it and because it is free, but the
@@ -538,16 +665,17 @@ ONNX threads left at the default **with a comment naming the two-core condition*
 
 **Decisions at this checkpoint**
 
-- **`engineMs` — settled 2026-07-31: option 1 of §9.** `engineMsScope: "inference+network"`, ADR-10
+- **`engineMs` — settled 2026-07-31: option 1 of the stage B gate section.** `engineMsScope: "inference+network"`, ADR-10
   amended, phase 07 item 19 rewritten. Stage B is unblocked.
 - **Models:** keep the bundled PP-OCRv4 **mobile ch/en** as `onnx-paddleocr`. 7/10 against 3/10 for
   PP-OCRv5, 1/10 for Cyrillic, 1/10 for Tesseract and 7/10 for PaddleOCR server at five times the
   memory — and it is the fastest of all of them.
-- **Cyrillic:** defer `onnx-paddleocr-cyrillic`. The first run recommended building it as ADR-12
-  requires; that run had no accuracy data and said so. The measurement now exists and says it makes the
-  self-hosted path worse, and that its benefit — matchable Bulgarian anchors — addresses a constraint
-  §6 shows is not binding. Record the measurement as the reason and revisit if the dataset ever grows
-  date lines with two competing candidates.
+- **Cyrillic — settled 2026-07-31: `onnx-paddleocr-cyrillic` is deferred, not built.** The first run
+  recommended building it as ADR-12 requires; that run had no accuracy data and said so. The
+  measurement now exists and says it makes the self-hosted path worse, and that its benefit — matchable
+  Bulgarian anchors — addresses a constraint §6 shows is not binding. ADR-12 is amended and accepted on
+  that basis. The `method` enum entry and price-table key stay, so adding the engine later is a compose
+  service rather than a schema change and a migration.
 - **The dataset** — not a phase 07 task, but a prerequisite for phases 08–10 meaning anything. Ten
   photographs of five products, six of them one box, cannot carry an accuracy claim.
 

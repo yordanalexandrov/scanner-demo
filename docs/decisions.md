@@ -430,7 +430,7 @@ correlation under concurrency, and the image logs no durations anyway. The searc
 does report it came up empty: `rapidocr_api` 0.2.0 is the final release of that package,
 `jarvis1tube/paddleocr-server` reports no timing either and peaks at 2.42 GB against ~2.1 GB available
 on the deployment box, and Tesseract's HTTP server reports none. See
-[the spike](spikes/07-ocr-sidecar.md#9-the-stage-b-gate-there-is-no-inference-duration-and-no-alternative-that-has-one).
+[the spike](spikes/07-ocr-sidecar.md#the-stage-b-gate-there-is-no-inference-duration-and-no-alternative-that-has-one).
 
 So the self-hosted path measures the whole HTTP call from inside the Fastify handler and labels it
 `engineMsScope: "inference+network"`. **The process boundary is inside `engineMs` and cannot be
@@ -518,7 +518,33 @@ detection and recognition models are preferred over the server variants regardle
 specification. `"onnx-paddleocr-cyrillic"` is present in the `method` enum and the price table from phase
 01 onward, so a positive spike result needs no schema change.
 
-**Status.** Provisional — revisited at the phase 07 spike checkpoint.
+**Amendment, 2026-07-31 — reachable, and deferred anyway.** The spike answered the question this ADR
+posed and then made it the wrong question. Cyrillic **is** reachable through configuration alone: three
+lowercase environment variables (`det_model_path`, `cls_model_path`, `rec_model_path` — all three or
+none) plus a read-only mount of `cyrillic_PP-OCRv3_rec_infer.onnx`, checksum-verified against
+RapidOCR's own manifest, with no Python, no rebuilt image and no internet at run time — proven on an
+internal Docker network with no DNS. The character dictionary needs no separate handling: for the
+onnxruntime backend RapidOCR reads it from the model's embedded metadata.
+
+This ADR assumed feasibility was the deciding question. It is not. Measured over ten real packaging
+photographs through the actual shared parser, the stock Chinese/English models yield a parseable expiry
+date on **7 of 10** and the Cyrillic model on **1 of 10 — and that one is wrong** (`18.12` where the
+date is `16.12.2026`). It reads Cyrillic words better and destroys the digits, and the digits are the
+measurement. See [the spike](spikes/07-ocr-sidecar.md#7-replacing-the-model-and-the-dictionary--yes-by-configuration-alone).
+
+So `onnx-paddleocr-cyrillic` is **deferred, not built** — decided at the stage A checkpoint on
+2026-07-31. Its stated benefit was making Bulgarian anchor phrases matchable, and the same spike showed
+that is not the binding constraint: every successful parse on this engine came from `sole-candidate`,
+because it never produced two competing candidates for `anchor-proximity` to choose between. The
+binding constraint is dot-matrix date printing, which no CPU engine tested reads at all.
+
+**The enum entry and the price-table key stay.** They cost nothing, they were provisioned in phase 01
+for exactly this option, and removing them would make adding the engine later a schema change plus a
+migration rather than a compose service. Revisit if the dataset ever grows date lines with two
+competing candidates, or if a Cyrillic recognition model appears that does not trade away digits.
+
+**Status.** Accepted — 2026-07-31, on measurement rather than on the feasibility question this ADR
+originally posed.
 
 ---
 

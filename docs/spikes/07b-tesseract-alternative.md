@@ -209,7 +209,7 @@ Three things worth carrying forward regardless:
    out to share one property: **the date is dot-matrix inkjet**, and the ones both engines read are
    continuous-glyph prints. Tesseract's 1/10 and RapidOCR's 7/10 are the same finding seen from two
    distances — RapidOCR's detector rescues the easy cases, and neither engine touches the hard ones.
-   Four engines have now read 0 of 3 dot-matrix dates; see §7 and §10 of
+   Four engines have now read 0 of 3 dot-matrix dates; see "Why the three failures are one failure" and "Would more hardware change any of this?" in
    [07-ocr-sidecar.md](07-ocr-sidecar.md).
 2. **`tessdata_fast` is genuinely fast and genuinely accurate on located lines**: 0.272 s per crop and
    a clean `07/2027`. If a future phase ever crops to a region of interest — a user-drawn box, a
