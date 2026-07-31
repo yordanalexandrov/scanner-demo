@@ -538,7 +538,10 @@ Engine string `onnx-paddleocr`; `costEstimateUsd: 0` per ADR-11.
 **Two decisions requested at this checkpoint**
 
 - **Models:** keep the image's bundled PP-OCRv4 **mobile ch/en** as `onnx-paddleocr`. 7/10 versus 3/10
-  for PP-OCRv5 and 1/10 for Cyrillic, and it is the fastest of the three.
+  for PP-OCRv5 and 1/10 for Cyrillic, and it is the fastest of the three. A follow-up spike,
+  [07b-tesseract-alternative.md](07b-tesseract-alternative.md), measured Tesseract 5.5.1 with Bulgarian
+  language data under this same protocol and reached 1/10, so this recommendation survives the obvious
+  alternative.
 - **Cyrillic:** build `onnx-paddleocr-cyrillic` as a second labelled engine per ADR-12, or defer it? It
   is cheap — one mounted `.onnx` and a second service — but on the evidence above it will make the
   self-hosted path look worse, not better, and its benefit (matchable Bulgarian anchors) addresses a
