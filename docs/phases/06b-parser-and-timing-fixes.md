@@ -1,6 +1,6 @@
 # Phase 06b — Parser and timing corrections
 
-**Status:** in progress · **Depends on:** 06 · **Blocks:** 07 ·
+**Status:** complete · **Depends on:** 06 · **Blocks:** 07 ·
 **Source:** defects found in the phase 05/06 dataset collected on 2026-07-30
 
 ## Goal
@@ -267,14 +267,47 @@ unmeasured operator handoff and is not labelled end-to-end latency.
 14. `pnpm -r lint` passes; `git grep -n -B 2 'Date\.now()' -- app server packages` returns only the
     documented wall-clock timestamp and filter-bound call sites, each with its eslint-disable rationale.
 
+## Acceptance evidence
+
+Verified on 2026-07-31 on an SM-S928B (Android 16) against `scanner.yo-po.eu`, with server commit
+`6f4930b` deployed before the APK:
+
+- `pnpm -r build && pnpm -r typecheck && pnpm -r test && pnpm -r lint` passed: 48 shared tests and 75
+  server tests, including all five recorded-block fixtures and the populated migration test. The Android
+  release build also passed and produced an APK with SHA-256
+  `04afbde18c031ae57c610a1a7044b262d336dc2e75a90ee8b1161a0685289767`.
+- The production migration began from an online SQLite backup at
+  `/data/db/scanner-pre-06b-6f4930b.sqlite`, SHA-256
+  `f24879dd317396c14d6a97a8ecdd35f00b5bb5e8ecee6833d9a0965b3abb5a02`. All 13 pre-existing rows
+  retained identical values in all 23 pre-06b columns, including byte-identical JSON payloads, and were
+  backfilled as `parser-v1` / `shutter-v1`. No attempt was recorded between the server migration and APK
+  installation.
+- A Library re-run of pesto group `06dce108` produced `2026-12-01` from the original variant with
+  `8.54` retained diagnostically and rejected by the sanity window. Available Nurofen group `3edba2fe`
+  produced `2027-07-31`, month precision, from `07/2027`. Both use `parser-v2` / `method-v2`; all legacy
+  rows remain additive and unchanged.
+- After a camera wait longer than 44 s, the upload and original attempts measured totals of 121.1 ms and
+  228.8 ms. Their local orchestration remainders were 0.09 ms and 0.08 ms, and the original did not
+  contain the upload inference. Capture, downscale and upload summed to a separately displayed
+  1,613.5 ms capture cost, shown once.
+- The gallery picker remained open for 51.9 s. Its upload attempt kept `captureMs: null`, recorded
+  downscale 94.2 ms and upload 345.4 ms outside a 200.4 ms method total, and left a 0.24 ms local
+  remainder. Its original attempt kept all capture-side fields `null`, measured 156.4 ms with a 0.09 ms
+  remainder, and both variants parsed `2026-03-31`.
+- A stored pesto Library re-run reconciled download 1,287.7 ms, inference 216.2 ms and parse 4.3 ms
+  inside total 1,510.9 ms, leaving 2.7 ms for local orchestration. The re-run displayed no capture cost.
+- The live Library visibly retained its `(method, inputVariant)` groups while labelling separate
+  `parser-v1` / `shutter-v1` and `parser-v2` / `method-v2` cohorts. The final production audit contained
+  13 legacy and 7 current attempts, and the scanner container and health endpoint were healthy.
+
 ## Risks / unknowns
 
 - The sanity window becomes a filter rather than a veto, so a genuine date more than 10 years out — rare,
   but sterile medical goods do exist — is now dropped before the rule instead of being surfaced as a
   chosen-then-rejected candidate. It stays in `candidates` with its reason, so the case remains visible in
   the export; it is no longer visible as "the date we would have chosen".
-- The 20+ attempt rows already collected were produced by the legacy parser and timing protocol. They
-  stay, and the two explicit versions keep them honest. A generated SQLite migration that adds
+- The 13 attempt rows present at the production rollout were produced by the legacy parser and timing
+  protocol. They stay, and the two explicit versions keep them honest. A generated SQLite migration that adds
   `not null` columns without a verified backfill is not acceptable against this database.
 - Engine latency naturally varies, so two totals are not required to be numerically equal. The timing
   criteria instead insert a known human delay and prove it is absent, then reconcile each total with its

@@ -71,7 +71,7 @@ four once the remaining engines exist, so it blocks 07 rather than following it.
 | [04](04-barcode.md) | Barcode scan screen | complete | Live decode + recorded latency |
 | [05](05-capture-mlkit.md) | Expiry capture, on-device OCR, date parser | complete | Capture, two variants, parser tests |
 | [06](06-library.md) | Image library | complete | Grid, filters, additive re-runs |
-| [06b](06b-parser-and-timing-fixes.md) | Parser and timing corrections | in progress | Recorded-block fixtures, re-runs, method totals that reconcile |
+| [06b](06b-parser-and-timing-fixes.md) | Parser and timing corrections | complete | Recorded-block fixtures, re-runs, method totals that reconcile |
 | [07](07-ocr-sidecar.md) | Self-hosted OCR sidecar | not started | **Two stops:** spike report, then build-out |
 | [08](08-gcv.md) | Google Cloud Vision engine | not started | GCV over existing library images |
 | [09](09-vlm.md) | VLM engine | not started | Model answer vs parser answer, provider swap |
