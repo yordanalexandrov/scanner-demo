@@ -95,6 +95,23 @@ export const imageListQuerySchema = z.strictObject({
 
 export type ImageListQuery = z.infer<typeof imageListQuerySchema>;
 
+/**
+ * The body of every server-side OCR request: an image ID, and deliberately nothing else.
+ *
+ * **A path never appears here, and that is the point.** The server constructs the filesystem path
+ * from the ID it minted itself, so no client can name a file - spec, § Stack - Server. The schema is
+ * strict for the same reason `imageUploadMetaSchema` is: a stray `path`-like key must be an error
+ * rather than a field that is quietly ignored while looking like it was honoured.
+ *
+ * Phases 08 and 09 send the same body to their own endpoints. It lives here, once, because the app
+ * builds it and the server validates it - and two copies of a request shape drift.
+ */
+export const ocrRequestSchema = z.strictObject({
+  imageId: z.string().min(1),
+});
+
+export type OcrRequest = z.infer<typeof ocrRequestSchema>;
+
 export const imageListResponseSchema = z.object({
   items: z.array(imageRecordSchema),
   /** `null` on the last page. Opaque to the client - decode it nowhere but the server. */

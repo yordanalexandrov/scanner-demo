@@ -15,7 +15,19 @@ import type { OcrResponse } from '@scanner-demo/shared';
 export interface OcrEngine {
   /** Doubles as the price-table key and as the `engine` field of every response - ADR-11. */
   readonly name: string;
-  recognise(input: { imageId: string; path: string }): Promise<OcrResponse>;
+  recognise(input: {
+    imageId: string;
+    path: string;
+    /**
+     * Aborts the recognition when the caller is no longer there to receive it.
+     *
+     * **Added to the interface the phase document sketches, on purpose.** The box has two cores
+     * shared with production - ADR-18 - and an inference nobody is waiting for still occupies one
+     * of them; worse, it delays the request that replaced it and inflates *that* measurement.
+     * Optional, so an engine that cannot cancel simply ignores it rather than pretending.
+     */
+    signal?: AbortSignal;
+  }): Promise<OcrResponse>;
 }
 
 /**
@@ -27,10 +39,20 @@ export interface OcrEngine {
  */
 export class OcrEngineError extends Error {
   readonly timedOut: boolean;
+  /**
+   * The caller abandoned the request. Not a fact about the engine at all, which is why it is
+   * separated: logging a dropped phone connection as an engine failure would put a network event
+   * into the record of how often this engine fails.
+   */
+  readonly cancelled: boolean;
 
-  constructor(message: string, options: { timedOut?: boolean; cause?: unknown } = {}) {
+  constructor(
+    message: string,
+    options: { timedOut?: boolean; cancelled?: boolean; cause?: unknown } = {},
+  ) {
     super(message, { cause: options.cause });
     this.name = 'OcrEngineError';
     this.timedOut = options.timedOut ?? false;
+    this.cancelled = options.cancelled ?? false;
   }
 }

@@ -146,53 +146,60 @@ async function request<T>(
 ): Promise<T> {
   const { signal, dispose } = abortSignalFor(options);
 
-  let response: Response;
+  // **The timer is disposed after the body is read, not after the headers arrive.** Cleared at the
+  // end of `fetch`, the timeout would cover only the response line: a connection that delivers
+  // headers and then stalls - nginx answering while the server behind it hangs - would leave
+  // `response.json()` waiting with nothing left to interrupt it, and the screen busy forever. The
+  // stated timeout is a bound on the whole round trip or it is not a bound.
   try {
-    response = await fetch(apiUrl(path), {
-      ...init,
-      signal,
-      headers: {
-        // Sent on /health too, which does not require it. One code path is worth more than the
-        // handful of bytes saved by special-casing the only unauthenticated route.
-        ...authHeaders(),
-        Accept: 'application/json',
-        ...init.headers,
-      },
-    });
-  } catch (error: unknown) {
-    throw new ApiError(error instanceof Error ? error.message : 'Network request failed', {
-      kind: 'network',
-      cause: error,
-    });
+    let response: Response;
+    try {
+      response = await fetch(apiUrl(path), {
+        ...init,
+        signal,
+        headers: {
+          // Sent on /health too, which does not require it. One code path is worth more than the
+          // handful of bytes saved by special-casing the only unauthenticated route.
+          ...authHeaders(),
+          Accept: 'application/json',
+          ...init.headers,
+        },
+      });
+    } catch (error: unknown) {
+      throw new ApiError(error instanceof Error ? error.message : 'Network request failed', {
+        kind: 'network',
+        cause: error,
+      });
+    }
+
+    if (!response.ok) {
+      throw await httpError(response);
+    }
+
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch (error: unknown) {
+      throw new ApiError('Response body is not valid JSON', { kind: 'schema', cause: error });
+    }
+
+    const parsed = schema.safeParse(body);
+
+    if (!parsed.success) {
+      const issues = parsed.error.issues
+        .map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
+        .join('; ');
+      throw new ApiError(`Unexpected response from ${path} - ${issues}`, {
+        kind: 'schema',
+        status: response.status,
+        cause: parsed.error,
+      });
+    }
+
+    return parsed.data;
   } finally {
     dispose();
   }
-
-  if (!response.ok) {
-    throw await httpError(response);
-  }
-
-  let body: unknown;
-  try {
-    body = await response.json();
-  } catch (error: unknown) {
-    throw new ApiError('Response body is not valid JSON', { kind: 'schema', cause: error });
-  }
-
-  const parsed = schema.safeParse(body);
-
-  if (!parsed.success) {
-    const issues = parsed.error.issues
-      .map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
-      .join('; ');
-    throw new ApiError(`Unexpected response from ${path} - ${issues}`, {
-      kind: 'schema',
-      status: response.status,
-      cause: parsed.error,
-    });
-  }
-
-  return parsed.data;
 }
 
 export function apiGet<T>(

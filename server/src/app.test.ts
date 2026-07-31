@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
+import type { AddressInfo } from 'node:net';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import sharp from 'sharp';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -374,7 +375,11 @@ describe('self-hosted OCR', () => {
    * `engines/localOcr.test.ts`, and the container itself in the acceptance criteria.
    */
   function stubEngine(
-    behaviour: (input: { imageId: string; path: string }) => Promise<OcrResponse>,
+    behaviour: (input: {
+      imageId: string;
+      path: string;
+      signal?: AbortSignal;
+    }) => Promise<OcrResponse>,
   ) {
     const calls: { imageId: string; path: string }[] = [];
 
@@ -382,12 +387,36 @@ describe('self-hosted OCR', () => {
       calls,
       engine: {
         name: 'onnx-paddleocr',
-        recognise: (input: { imageId: string; path: string }) => {
+        recognise: (input: { imageId: string; path: string; signal?: AbortSignal }) => {
           calls.push(input);
           return behaviour(input);
         },
       },
     };
+  }
+
+  /**
+   * A stub that honours cancellation the way the real adapter does.
+   *
+   * A stub that ignored `signal` would make any test of the route's cancellation guard pass
+   * regardless of whether the guard is correct - which is exactly what happened once already.
+   */
+  function cancellableStub(delayMs: number) {
+    return stubEngine(
+      (input) =>
+        new Promise<OcrResponse>((resolve, reject) => {
+          const timer = setTimeout(() => resolve(ocrResponse()), delayMs);
+
+          input.signal?.addEventListener('abort', () => {
+            clearTimeout(timer);
+            reject(
+              new OcrEngineError('The caller went away before the OCR sidecar answered', {
+                cancelled: true,
+              }),
+            );
+          });
+        }),
+    );
   }
 
   function ocrResponse(overrides: Partial<OcrResponse> = {}): OcrResponse {
@@ -543,6 +572,31 @@ describe('self-hosted OCR', () => {
     // from the same clock, so this subtraction is one ADR-10 permits - and what it measures is this
     // handler's own overhead, not the process boundary, because the boundary is inside `engineMs`.
     expect(body.serverTotalMs ?? 0).toBeGreaterThan(body.engineMs);
+  });
+
+  it('does not treat a consumed request body as a client hanging up - over real HTTP', async () => {
+    // A regression test with a scar. The cancellation guard first listened on `request.raw`, whose
+    // `close` fires as soon as the JSON body has been read - milliseconds in, client still there -
+    // so every request was cancelled and the caller got nothing at all. `inject()` does not model
+    // that, and passed; only a real socket shows it. Hence this one test listens for real.
+    const { imageId } = await upload(await testImage(1200, 1600));
+    // The stub honours `signal`, so a guard that fires too early ends this request with nothing
+    // rather than with a response - which is precisely what the bug did.
+    const stub = cancellableStub(50);
+    const instance = await withEngine(stub.engine);
+
+    await instance.listen({ host: '127.0.0.1', port: 0 });
+    const address = instance.server.address() as AddressInfo;
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/v1/ocr/local`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ imageId }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(ocrResponseSchema.safeParse(await response.json()).success).toBe(true);
+    expect(stub.calls).toHaveLength(1);
   });
 
   it('never polls: the engine is called once per request', async () => {

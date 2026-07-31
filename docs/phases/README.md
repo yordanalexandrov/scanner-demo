@@ -98,8 +98,10 @@ against `ocrResponseSchema`, and `{"imageId":"../../etc/passwd"}` returns 400 wi
 called; a `docker compose pause` produced **504 at 30.005 s**, the configured limit, rather than a
 hang; `cpu.max` is `150000 100000` and `memory.max` 1 GiB, with peak CPU at the cap and peak
 `VmHWM` 615 MiB on the upload variant. Twenty consecutive warm requests gave a median `engineMs` of
-578.3 ms with **IQR ÷ median = 5.7 %**, inside criterion 13's 20 %, and the first request after a
-sidecar restart cost 831 ms against that median.
+506.0 ms with **IQR ÷ median = 12.5 %**, inside criterion 13's 20 %, and the first request after a
+sidecar restart cost 768.9 ms against that median. Three simultaneous requests came back at 500, 579
+and 509 ms of `engineMs` with `serverTotalMs` of 504, 1083 and 1597 ms — the queue serialising them,
+with the waiting counted where it belongs.
 
 **Three criteria are not met by that run and need the box.** Criterion 13's figures and criterion 15's
 "the production Supabase containers stay healthy" are only meaningful on the two-core box under

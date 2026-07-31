@@ -185,6 +185,130 @@ describe('the sidecar adapter', () => {
     );
   });
 
+  it('reports a timeout while reading the body as a timeout, not as a bad shape', async () => {
+    // `docker pause` between the status line and the JSON. The engine was not wrong here, it was
+    // too slow, and the two are different results about it - criterion 10.
+    respond = (_request, response) => {
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.write('{"0": {"rec_txt": "07/2027",');
+      // Deliberately never finished.
+    };
+
+    const failure = await engine({ timeoutMs: 300 })
+      .recognise({ imageId: 'an-id', path: imagePath })
+      .catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(OcrEngineError);
+    expect((failure as OcrEngineError).timedOut).toBe(true);
+  });
+
+  it('refuses geometry that is not the four points the engine was measured to return', async () => {
+    // A single point converts to `bbox: [500, 500, 0, 0]` - which looks like geometry, is not, and
+    // would enter the record as though it were.
+    respond = (_request, response) => {
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end(
+        JSON.stringify({ '0': { rec_txt: '07/2027', dt_boxes: [[500, 500]], score: 0.9 } }),
+      );
+    };
+
+    await expect(engine().recognise({ imageId: 'an-id', path: imagePath })).rejects.toThrow(
+      OcrEngineError,
+    );
+  });
+
+  it('refuses a confidence outside [0, 1] rather than clamping it into range', async () => {
+    // Clamping 7 to 1 would record fabricated certainty. A score that far out is a broken engine.
+    respond = (_request, response) => {
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end(
+        JSON.stringify({
+          '0': {
+            rec_txt: '07/2027',
+            dt_boxes: [
+              [0, 0],
+              [10, 0],
+              [10, 10],
+              [0, 10],
+            ],
+            score: 7,
+          },
+        }),
+      );
+    };
+
+    await expect(engine().recognise({ imageId: 'an-id', path: imagePath })).rejects.toThrow(
+      OcrEngineError,
+    );
+  });
+
+  it('runs one call at a time, because overlapping inference measures contention', async () => {
+    // The spike measured two simultaneous requests at 4.5 s and 4.1 s against 1.9 s solo, and asks
+    // for a queue if overlap is possible. This asserts the queue exists, not how fast it is.
+    let inFlight = 0;
+    let maxInFlight = 0;
+
+    sidecar.removeAllListeners('request');
+    sidecar.on('request', (request, response) => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      request.resume();
+      setTimeout(() => {
+        inFlight -= 1;
+        response.writeHead(200, { 'Content-Type': 'application/json' });
+        response.end(twoBlocks());
+      }, 40);
+    });
+
+    const shared = engine();
+    await Promise.all([
+      shared.recognise({ imageId: 'a', path: imagePath }),
+      shared.recognise({ imageId: 'b', path: imagePath }),
+      shared.recognise({ imageId: 'c', path: imagePath }),
+    ]);
+
+    expect(maxInFlight).toBe(1);
+  });
+
+  it('keeps serving after a failed call rather than wedging the queue', async () => {
+    const shared = engine();
+
+    respond = (_request, response) => {
+      response.writeHead(500, { 'Content-Type': 'text/plain' });
+      response.end('Internal Server Error');
+    };
+    await expect(shared.recognise({ imageId: 'a', path: imagePath })).rejects.toThrow(
+      OcrEngineError,
+    );
+
+    respond = (_request, response) => {
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end(twoBlocks());
+    };
+    await expect(shared.recognise({ imageId: 'b', path: imagePath })).resolves.toMatchObject({
+      engine: 'onnx-paddleocr',
+    });
+  });
+
+  it('abandons the call when the caller goes away, and says that is what happened', async () => {
+    respond = () => {
+      // Never answers, so only the caller's own signal can end this.
+    };
+
+    const controller = new AbortController();
+    const pending = engine()
+      .recognise({ imageId: 'an-id', path: imagePath, signal: controller.signal })
+      .catch((error: unknown) => error);
+
+    setTimeout(() => controller.abort(), 50);
+    const failure = await pending;
+
+    expect(failure).toBeInstanceOf(OcrEngineError);
+    // A dropped client is not an engine failure, and must not be counted as one.
+    expect((failure as OcrEngineError).cancelled).toBe(true);
+    expect((failure as OcrEngineError).timedOut).toBe(false);
+  });
+
   it('rejects a 200 whose body is not the shape the engine promises', async () => {
     respond = (_request, response) => {
       response.writeHead(200, { 'Content-Type': 'application/json' });

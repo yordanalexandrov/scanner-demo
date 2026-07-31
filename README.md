@@ -20,7 +20,9 @@ comparability wins.
 
 ## Status
 
-**Phases 01 to 07 of 10 are complete; phase 08 is next.** Every
+**Phases 01 to 06 of 10 are complete. Phase 07 is built and verified off the deployment box; its
+acceptance run on the box itself is outstanding**, so it is not counted as complete here — see
+[`docs/phases/README.md`](docs/phases/README.md) for exactly which criteria are still open. Every
 record the harness stores is defined once in `packages/shared`. The server is deployed at
 `scanner.yo-po.eu`, stores, serves and thumbnails images, and records barcode decode latencies. The
 Android app builds as an Expo development build, navigates its screens, scans EAN-13 with the decode
@@ -72,9 +74,9 @@ image at boot, so no real measurement pays it:
 
 | Figure | Deployment box (2 cores, shared) | Workstation (32 cores, `cpus: 1.5`) |
 |---|---|---|
-| Cold start, first real request | 3.4–3.9 s | 831 ms |
-| Warm median | 1.854 s | 578 ms |
-| Spread, IQR ÷ median | 12.0 % (n=25) | 5.7 % (n=20) |
+| Cold start, first real request | 3.4–3.9 s | 769 ms |
+| Warm median | 1.854 s | 506 ms |
+| Spread, IQR ÷ median | 12.0 % (n=25) | 12.5 % (n=20) |
 
 The box figures come from the stage A spike, under the co-tenancy
 [ADR-18](docs/decisions.md) describes — two cores shared with a live Supabase stack and two
@@ -85,6 +87,19 @@ the shape holds, not as a benchmark result. **Only the box figures are the bench
 **The warm-up only warms the size it used.** Cold start is per input size as well as per process, so
 the dummy image is the 1200×1600 upload variant the app actually produces. A Library re-run over an
 archived full-resolution original still pays a one-off cost that no warm-up removes.
+
+**Calls to the engine are serialised, one at a time.** Two simultaneous requests were measured at
+4.5 s and 4.1 s against 1.9 s solo — worse than queueing, because both inferences then fight over
+the same 1.5 CPUs. An `engineMs` inflated by contention is indistinguishable in the data from a slow
+engine, so the server queues instead. Time spent waiting for the queue lands in `serverTotalMs`,
+never in `engineMs`, and a request whose phone hangs up is cancelled rather than left running.
+
+**A sidecar restart bypasses the warm-up, and nothing detects it.** Warm-up runs when the *server*
+starts. If the sidecar restarts on its own — `docker compose restart ocr`, or an OOM kill after a
+large original — the next real request pays the model load and records 3–4× the steady-state figure
+as though it were steady state. The container exposes no uptime or readiness signal that would let
+the server notice, so this is documented rather than defended against: **after restarting the
+sidecar alone, restart the server too**, or discard the first measurement that follows.
 
 **Memory has less headroom than the upload path suggests.** Peak resident memory, measured per input
 size with a restart between:

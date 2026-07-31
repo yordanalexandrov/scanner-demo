@@ -43,17 +43,30 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function describe(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
+}
+
 /**
  * Runs one dummy inference, retrying while the sidecar is still loading.
  *
- * It never throws. A benchmark server that refused to start because its optional warm-up failed
- * would be trading a slow first measurement for no measurements at all; the failure is logged and
- * the first real request pays the cold cost instead.
+ * **It never rejects, and that is enforced rather than asserted.** A benchmark server that refused
+ * to start because its optional warm-up failed would be trading a slow first measurement for no
+ * measurements at all - and the failure modes are not only the engine's: a full or unwritable
+ * `/tmp` makes `mkdtemp` throw after the server is already listening, where an unhandled rejection
+ * takes the process down under Node's default and turns a warm-up problem into a restart loop.
+ * Every path returns a `WarmupResult` saying what happened.
  */
 export async function warmUpEngine(options: WarmupOptions): Promise<WarmupResult> {
   const { engine, attempts = 5, delayMs = 3_000 } = options;
 
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'scanner-demo-warmup-'));
+  let directory: string;
+  try {
+    directory = await fs.mkdtemp(path.join(os.tmpdir(), 'scanner-demo-warmup-'));
+  } catch (error: unknown) {
+    return { ok: false, ms: null, attempts: 0, error: describe(error, 'No warm-up directory') };
+  }
+
   const file = path.join(directory, 'warmup.jpg');
 
   try {
@@ -79,7 +92,7 @@ export async function warmUpEngine(options: WarmupOptions): Promise<WarmupResult
         await engine.recognise({ imageId: 'warmup', path: file });
         return { ok: true, ms: elapsed(startedAt), attempts: attempt, error: null };
       } catch (error: unknown) {
-        lastError = error instanceof Error ? error.message : 'The warm-up failed';
+        lastError = describe(error, 'The warm-up failed');
 
         if (attempt < attempts) {
           await sleep(delayMs);
@@ -88,7 +101,13 @@ export async function warmUpEngine(options: WarmupOptions): Promise<WarmupResult
     }
 
     return { ok: false, ms: null, attempts, error: lastError };
+  } catch (error: unknown) {
+    // Writing the dummy image is the only other thing that can fail here, and it fails the warm-up
+    // rather than the process.
+    return { ok: false, ms: null, attempts: 0, error: describe(error, 'No warm-up image') };
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    // A leftover temporary directory is not worth a rejection escaping from a `finally`, where it
+    // would replace whichever result this function had already decided on.
+    await fs.rm(directory, { recursive: true, force: true }).catch(() => undefined);
   }
 }

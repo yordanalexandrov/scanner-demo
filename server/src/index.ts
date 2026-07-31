@@ -60,16 +60,26 @@ async function main(): Promise<void> {
     // works without the sidecar; blocking the boot on a container that takes five seconds to load
     // its models would make a deploy look hung. The cold figure is logged because it is the one the
     // README reports separately - phase 07 item 16.
-    void warmUpEngine({ engine: localOcrEngine }).then((result) => {
-      if (result.ok) {
-        fastify.log.info({ coldStartMs: result.ms, attempts: result.attempts }, 'OCR sidecar warm');
-      } else {
-        fastify.log.warn(
-          { attempts: result.attempts, reason: result.error },
-          'the OCR sidecar did not warm up; the first request will pay the model load',
-        );
-      }
-    });
+    void warmUpEngine({ engine: localOcrEngine })
+      .then((result) => {
+        if (result.ok) {
+          fastify.log.info(
+            { coldStartMs: result.ms, attempts: result.attempts },
+            'OCR sidecar warm',
+          );
+        } else {
+          fastify.log.warn(
+            { attempts: result.attempts, reason: result.error },
+            'the OCR sidecar did not warm up; the first request will pay the model load',
+          );
+        }
+      })
+      // `warmUpEngine` is written not to reject, so this is the belt to that braces: an unhandled
+      // rejection here would take down a server that is already listening and serving every other
+      // route, turning an optional optimisation into a restart loop.
+      .catch((error: unknown) => {
+        fastify.log.error({ err: error }, 'the warm-up itself failed unexpectedly');
+      });
   }
 }
 

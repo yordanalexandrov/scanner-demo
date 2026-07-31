@@ -1,4 +1,4 @@
-import { ocrResponseSchema } from '@scanner-demo/shared';
+import { ocrRequestSchema, ocrResponseSchema } from '@scanner-demo/shared';
 import type { OcrResponse } from '@scanner-demo/shared';
 import { apiPost } from './client';
 
@@ -27,7 +27,10 @@ import { apiPost } from './client';
 const OCR_TIMEOUT_MS = 45_000;
 
 export function recogniseWithSelfHostedOcr(imageId: string): Promise<OcrResponse> {
-  return apiPost('/api/v1/ocr/local', { imageId }, ocrResponseSchema, {
+  // Built through the shared schema rather than as an object literal. The server validates the very
+  // same schema, so a field that is renamed there stops compiling here instead of turning into a
+  // 400 that only a deployed APK ever sees.
+  return apiPost('/api/v1/ocr/local', ocrRequestSchema.parse({ imageId }), ocrResponseSchema, {
     timeoutMs: OCR_TIMEOUT_MS,
   });
 }
