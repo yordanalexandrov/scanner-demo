@@ -26,6 +26,7 @@ nothing:
 | Conditions | Production Supabase stack **running** throughout — comparable with case B1 of the first spike |
 | Latency | `curl -w %{time_total}` from the host over loopback, 25 sequential requests after warm-up |
 | Accuracy | The **same `parseExpiryDate` from `packages/shared`**, same `referenceDate`, differing only in the adapter that turns each engine's output into `Block[]` |
+| Parser | `parser-v2` throughout — every figure below was re-scored after ADR-21 landed on `main`, and none of them moved |
 
 Both adapters are in the scratchpad probes, not in the repository. The Tesseract one groups TSV words
 into lines by `(block, par, line)`, unions their boxes and averages their confidences, because

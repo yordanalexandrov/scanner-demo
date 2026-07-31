@@ -21,6 +21,14 @@ under the same protocol.
 **Nothing under `server/src` was written.** The throwaway harness and raw output live in `~/spike-07/`
 on the box.
 
+**Every accuracy figure here was produced by `parser-v2`** — the parser as amended by
+[ADR-21](../decisions.md#adr-21--candidate-boundaries-and-the-order-of-the-sanity-window) in phase 06b,
+which landed on `main` while this spike was being written. The engine outputs were captured once and
+re-scored against the new parser rather than re-run, since the OCR is unaffected by a parser change.
+One figure moved, and instructively — see "A parser change moved one of these numbers" below. This is
+what `parserVersion` exists for: **an accuracy number from this harness is a statement about an engine
+and a parser together**, and citing one without the other is the confound ADR-21 was written to stop.
+
 ---
 
 ## Verdict
@@ -445,7 +453,7 @@ Same ten images, three model configurations, same parser:
 | Configuration | Images parsed to a date | Notes |
 | --- | --- | --- |
 | **PP-OCRv4 mobile ch/en (bundled default)** | **7 / 10** | Reads `07/2027` and `16.12.2026` cleanly |
-| PP-OCRv5 mobile ch (downloaded) | 3 / 10 | Reads `/` as `1` — `0712027` — on four images |
+| PP-OCRv5 mobile ch (downloaded) | 4 / 10 | Reads `/` as `1` — `0712027` — on four images, and **one of the four is a fabricated date** |
 | Cyrillic PP-OCRv3 (downloaded) | 1 / 10 | And that one is **wrong**: `18.12` where the date is `16.12.2026` |
 
 The failure mode is specific and consistent. On `94530004` the same date line reads:
@@ -463,6 +471,35 @@ newer version is not an upgrade for this task.
 
 **This settled ADR-12**, which had posed feasibility as the deciding question. Feasibility is a yes and
 it does not matter: `onnx-paddleocr-cyrillic` is deferred rather than built, on the measurement above.
+
+### A parser change moved one of these numbers
+
+Re-scoring the captured engine outputs against `parser-v2` left seven of the eight configurations
+measured here unchanged — the chosen engine included, at 7/10 with the same seven images. **PP-OCRv5
+moved from 3/10 to 4/10, and the extra is a fabricated date.**
+
+On `974b2984`, whose real best-before is `16.10.26`, v5 emits a noise block `1.10` alongside the
+rotated pre-printed code `04-2503`:
+
+```
+candidates: [ { raw: "04-2503", date: "2503-04-30", rejectedFor: "more than 10 years…" },
+              { raw: "1.10",    date: "2026-10-01", rejectedFor: null } ]
+chosen: 2026-10-01, day precision, status "valid", rule anchor-proximity
+signals: ["multiple-candidates","anchor-matched","ambiguous-numeric"]
+```
+
+Under `parser-v1` the sanity window ran last on the *chosen* candidate, so the implausible 2503 date
+won the deciding rule and was then discarded — the wrong answer masked the noise and the image
+returned nothing. ADR-21 moved the window ahead of the rule, exactly as it argues it should; the
+consequence on this input is that the surviving noise candidate now wins on its own.
+
+That is not an argument against ADR-21 — the old behaviour was accidental, not protective. It is worth
+recording for two other reasons. **A fabricated date is worse than a miss**, and this one carries
+`status: "valid"`. And it is the second time `anchor-proximity` has fired anywhere in this
+investigation — the first was a correct hit in the Tesseract hybrid of 07b — which means **the rule
+ADR-4 treats as the most trustworthy has a 1-in-2 record on real data here.** Its `signals` do record
+`ambiguous-numeric`, so the evidence is preserved; whether the results view leans on the rule name is
+a question for phase 10.
 
 ---
 
@@ -667,9 +704,9 @@ ONNX threads left at the default **with a comment naming the two-core condition*
 
 - **`engineMs` — settled 2026-07-31: option 1 of the stage B gate section.** `engineMsScope: "inference+network"`, ADR-10
   amended, phase 07 item 19 rewritten. Stage B is unblocked.
-- **Models:** keep the bundled PP-OCRv4 **mobile ch/en** as `onnx-paddleocr`. 7/10 against 3/10 for
-  PP-OCRv5, 1/10 for Cyrillic, 1/10 for Tesseract and 7/10 for PaddleOCR server at five times the
-  memory — and it is the fastest of all of them.
+- **Models:** keep the bundled PP-OCRv4 **mobile ch/en** as `onnx-paddleocr`. Under `parser-v2`, 7/10
+  against 4/10 for PP-OCRv5 — one of which is fabricated — 1/10 for Cyrillic, 1/10 for Tesseract and
+  7/10 for PaddleOCR server at five times the memory. It is also the fastest of all of them.
 - **Cyrillic — settled 2026-07-31: `onnx-paddleocr-cyrillic` is deferred, not built.** The first run
   recommended building it as ADR-12 requires; that run had no accuracy data and said so. The
   measurement now exists and says it makes the self-hosted path worse, and that its benefit — matchable
