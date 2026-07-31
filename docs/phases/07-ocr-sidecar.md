@@ -1,6 +1,6 @@
 # Phase 07 — Self-hosted OCR engine (sidecar container)
 
-**Status:** not started · **Depends on:** 02, 06 · **Source:** spec milestone 7
+**Status:** stage A complete; awaiting review · **Depends on:** 02, 06 · **Source:** spec milestone 7
 
 ## Goal
 
@@ -79,6 +79,14 @@ during stage A.
     difference is small and the latency difference is large. The selected model names go in the README.
     — *spec § Gotchas*
 21. The "Self-hosted" method button in the app is enabled and wired to this endpoint.
+22. **Carried over from phase 06: `imageListQuerySchema` becomes a `z.strictObject`.** It is a plain
+    `z.object` today, so zod strips query parameters it does not know. Against a server older than the app
+    that turns every new filter into a silent no-op: verified on 2026-07-30, a deployed server five commits
+    behind answered `?captureGroupId=does-not-exist` with a full page of rows instead of an error, so the
+    grid looked like it was filtering and was not. A filter that lies is worse than one that fails, and the
+    upload metadata is already strict for the same reason.
+    — [ADR-3](../decisions.md#adr-3--images-are-stored-in-two-variants-linked-by-capturegroupid), agreed at
+    phase 06's review
 
 ## Out of scope
 
