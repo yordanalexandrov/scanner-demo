@@ -88,7 +88,7 @@ function ParsedDate({ attempt }: { attempt: Attempt }) {
   );
 }
 
-function AttemptCard({ attempt }: { attempt: Attempt }) {
+function AttemptCard({ attempt, showCaptureCost }: { attempt: Attempt; showCaptureCost: boolean }) {
   const blockConfidences = attempt.ocr?.blocks.map((block) => block.confidence) ?? [];
   const reported = blockConfidences.filter((value): value is number => value !== null);
 
@@ -105,12 +105,16 @@ function AttemptCard({ attempt }: { attempt: Attempt }) {
         {attempt.ocr?.engine ?? 'no engine'} · {attempt.device}
         {attempt.ocr !== null && ` · ${attempt.ocr.imageWidth}×${attempt.ocr.imageHeight}`}
       </Text>
+      <Text style={styles.caption}>
+        parser {attempt.parserVersion} · timing {attempt.timingVersion}
+      </Text>
 
       {attempt.error !== null && <Text style={styles.failure}>{attempt.error}</Text>}
 
       <LatencyBreakdown
         timing={attempt.timing}
         engineMsScope={attempt.ocr?.engineMsScope ?? null}
+        showCaptureCost={showCaptureCost}
       />
 
       <ParsedDate attempt={attempt} />
@@ -165,6 +169,15 @@ export function ResultScreen() {
     void load();
   }, [load]);
 
+  // Capture segments are repeated on fresh upload rows for traceability, but they describe one
+  // physical capture. Showing them once prevents the result view from charging the shared cost to
+  // every method or re-run - ADR-22.
+  const captureCostAttemptId =
+    attempts?.find(
+      ({ timing }) =>
+        timing.captureMs !== null || timing.downscaleMs !== null || timing.uploadMs !== null,
+    )?.id ?? null;
+
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <View style={styles.card}>
@@ -196,7 +209,11 @@ export function ResultScreen() {
       )}
 
       {attempts?.map((attempt) => (
-        <AttemptCard key={attempt.id} attempt={attempt} />
+        <AttemptCard
+          key={attempt.id}
+          attempt={attempt}
+          showCaptureCost={attempt.id === captureCostAttemptId}
+        />
       ))}
     </ScrollView>
   );

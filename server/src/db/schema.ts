@@ -6,7 +6,9 @@ import type {
   ImageSource,
   ImageVariant,
   Method,
+  ParserVersion,
   ParseRule,
+  TimingVersion,
 } from '@scanner-demo/shared';
 
 /**
@@ -156,6 +158,9 @@ export const attempts = sqliteTable(
 
     /** ISO. Stored so a re-run a year later reaches the same verdict - ADR-6. */
     referenceDate: text('referenceDate').notNull(),
+    /** Parser and timing semantics are independent versioned dimensions - ADR-21, ADR-22. */
+    parserVersion: text('parserVersion').notNull().$type<ParserVersion>(),
+    timingVersion: text('timingVersion').notNull().$type<TimingVersion>(),
     pricingVersion: text('pricingVersion').notNull(),
     /** VLM only. A prompt change alters results the way a model change does. */
     promptVersion: text('promptVersion'),

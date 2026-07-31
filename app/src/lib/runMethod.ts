@@ -1,4 +1,11 @@
-import { PRICING_VERSION, elapsed, measureAsync, parseExpiryDate } from '@scanner-demo/shared';
+import {
+  PARSER_VERSION,
+  PRICING_VERSION,
+  TIMING_VERSION,
+  elapsed,
+  measureAsync,
+  parseExpiryDate,
+} from '@scanner-demo/shared';
 import type {
   AttemptCreate,
   ImageVariant,
@@ -48,8 +55,8 @@ export interface RunMethodInput {
   referenceDate: Date;
   prior: PriorTiming;
   /**
-   * When the user-visible action began, from `now()`. `totalMs` is measured from here to the parsed
-   * result and is a single-clock number end to end - ADR-10.
+   * The first work attributable to this attempt, from `now()`. `totalMs` is measured from here to
+   * the parsed result on the same phone clock - ADR-10, ADR-22.
    */
   startedAt: Millis;
 }
@@ -118,6 +125,8 @@ export async function runMlKit(input: RunMethodInput): Promise<RunMethodResult> 
     vlm: null,
     timing,
     referenceDate: input.referenceDate.toISOString().slice(0, 10),
+    parserVersion: PARSER_VERSION,
+    timingVersion: TIMING_VERSION,
     pricingVersion: PRICING_VERSION,
     promptVersion: null,
     error,

@@ -194,7 +194,6 @@ export function CaptureScreen() {
       setPreviewUri(`file://${photo.path}`);
 
       await beginFrom({
-        startedAt: shutterAt,
         uri: `file://${photo.path}`,
         width: photo.width,
         height: photo.height,
@@ -216,7 +215,6 @@ export function CaptureScreen() {
     setOutcomes([]);
     setArchived(null);
 
-    const pickedAt = now();
     const picked = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       // No editing and no re-encoding: the dataset is only worth having if the bytes are the ones
@@ -239,7 +237,6 @@ export function CaptureScreen() {
     );
 
     await beginFrom({
-      startedAt: pickedAt,
       uri: asset.uri,
       width: asset.width,
       height: asset.height,
@@ -281,11 +278,9 @@ export function CaptureScreen() {
       ];
 
       for (const { variant, image } of variants) {
-        // The measured path began at the shutter, so that is where the upload variant's total
-        // starts - ADR-10. The `original` run carries none of those segments and therefore times
-        // only itself; a total that excluded the capture would sit on screen underneath segments
-        // adding up to many times its own value.
-        const startedAt = variant === 'upload' ? stored.startedAt : now();
+        // One button can produce two rows, so "method invocation" means one fresh start per row.
+        // Otherwise the original total includes the upload inference that ran before it - ADR-22.
+        const startedAt = now();
         const outcome = await runMlKit({
           imageId: stored.imageId,
           captureGroupId: stored.captureGroupId,

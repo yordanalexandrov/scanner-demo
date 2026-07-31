@@ -5,7 +5,12 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import sharp from 'sharp';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { imageListQuerySchema, parseExpiryDate } from '@scanner-demo/shared';
+import {
+  PARSER_VERSION,
+  TIMING_VERSION,
+  imageListQuerySchema,
+  parseExpiryDate,
+} from '@scanner-demo/shared';
 import type {
   Attempt,
   AttemptCreate,
@@ -643,6 +648,8 @@ function attemptBody(imageId: string, overrides: Partial<AttemptCreate> = {}): A
       totalMs: 852.6,
     },
     referenceDate: '2025-06-01',
+    parserVersion: PARSER_VERSION,
+    timingVersion: TIMING_VERSION,
     pricingVersion: 'unset',
     promptVersion: null,
     error: null,
@@ -698,6 +705,8 @@ describe('attempts', () => {
     // A null segment stays null. Rendering it as 0 would corrupt every average built on it.
     expect(attempt?.timing.requestMs).toBeNull();
     expect(attempt?.timing.totalMs).toBe(852.6);
+    expect(attempt?.parserVersion).toBe(PARSER_VERSION);
+    expect(attempt?.timingVersion).toBe(TIMING_VERSION);
   });
 
   it('records two on-device attempts for one capture, one per variant - ADR-2', async () => {
@@ -768,6 +777,37 @@ describe('attempts', () => {
       url: '/api/v1/attempts',
       headers: { authorization: `Bearer ${TOKEN}` },
       payload: { ...body, method: 'not-a-method' },
+    });
+
+    expect(response.statusCode).toBe(400);
+  });
+
+  it.each(['parserVersion', 'timingVersion'] as const)(
+    'refuses a post-migration attempt missing %s',
+    async (field) => {
+      const { imageId } = await upload(await testImage(320, 240));
+      const payload: Record<string, unknown> = { ...attemptBody(imageId) };
+      delete payload[field];
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/attempts',
+        headers: { authorization: `Bearer ${TOKEN}` },
+        payload,
+      });
+
+      expect(response.statusCode).toBe(400);
+    },
+  );
+
+  it('refuses unknown semantic version identifiers', async () => {
+    const { imageId } = await upload(await testImage(320, 240));
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/attempts',
+      headers: { authorization: `Bearer ${TOKEN}` },
+      payload: { ...attemptBody(imageId), parserVersion: 'parser-typo' },
     });
 
     expect(response.statusCode).toBe(400);

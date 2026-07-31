@@ -2,14 +2,20 @@ import { describe, expect, it } from 'vitest';
 
 import {
   ANCHOR_PHRASES,
+  LEGACY_PARSER_VERSION,
+  LEGACY_TIMING_VERSION,
   MONTH_NAME_TABLES,
+  PARSER_VERSION,
   PRICING_VERSION,
+  TIMING_VERSION,
   barcodeScanCreateSchema,
   elapsed,
   median,
   now,
   ocrResponseSchema,
+  parserVersionSchema,
   pricing,
+  timingVersionSchema,
 } from './index.js';
 
 describe('shared contracts', () => {
@@ -46,6 +52,13 @@ describe('shared contracts', () => {
       // An unknown cost must never be indistinguishable from a free one.
       expect(entry.usd === null || entry.usd === 0 || entry.retrieved !== null).toBe(true);
     }
+  });
+
+  it('accepts only declared parser and timing semantics', () => {
+    expect(parserVersionSchema.options).toEqual([LEGACY_PARSER_VERSION, PARSER_VERSION]);
+    expect(timingVersionSchema.options).toEqual([LEGACY_TIMING_VERSION, TIMING_VERSION]);
+    expect(parserVersionSchema.safeParse('parser-typo').success).toBe(false);
+    expect(timingVersionSchema.safeParse('timing-typo').success).toBe(false);
   });
 
   it('measures durations from a monotonic clock', () => {

@@ -27,6 +27,7 @@ export const ANCHOR_PHRASES: readonly AnchorPhrase[] = [
   { phrase: 'BEST BEFORE', locale: 'en' },
   { phrase: 'USE BY', locale: 'en' },
   { phrase: 'MHD', locale: 'de' },
+  { phrase: 'Mindestens haltbar bis', locale: 'de' },
   { phrase: 'DLC', locale: 'fr' },
   { phrase: 'Годен до', locale: 'bg' },
   { phrase: 'Срок на годност', locale: 'bg' },

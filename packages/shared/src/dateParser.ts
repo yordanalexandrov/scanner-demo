@@ -10,12 +10,15 @@
  * The rules, in the order they are applied:
  *
  * 1. Extract every date-shaped candidate from every block, keeping its raw substring and its box.
+ * 1b. Mark candidates outside the sanity window and exclude them from the deciding rules.
  * 2. `anchor-proximity` - an anchor phrase and a candidate that both have boxes, close enough.
  * 3. `latest-of-pair` - two or more candidates, no usable anchor: the later is the expiry and the
  *    earlier is the production date, which is reported rather than discarded.
  * 4. `sole-candidate` - exactly one.
  * 5. Numeric ambiguity in two-component dates, resolved positionally - ADR-6.
- * 6. The sanity window, applied last and only to the chosen candidate - ADR-6, ADR-7.
+ *
+ * A merely expired candidate remains eligible. The window rejects OCR noise, not old food - ADR-7,
+ * ADR-21.
  */
 
 import { ANCHOR_PHRASES } from './data/anchors.js';
@@ -102,7 +105,7 @@ function fold(value: string): string {
  * any pattern that has one - ADR-16. Both live in the patterns below as character classes rather
  * than being rewritten into the text, so the raw substring stays exactly as printed.
  */
-const SEP = '[./\\-\\s]';
+const SEP = '[./\\- ]';
 
 // ---------------------------------------------------------------------------------------------
 // Month names
@@ -453,6 +456,9 @@ export function parseExpiryDate(blocks: readonly Block[], opts: ParseOptions): P
   const referenceIso = toIsoDate(referenceDate);
 
   const candidates = blocks.flatMap((block) => extractFrom(block.text, block.bbox, referenceDate));
+  const eligibleCandidates = candidates.filter((candidate) =>
+    withinSanityWindow(toDate(candidate), referenceDate),
+  );
 
   const signals: ParseSignal[] = [];
 
@@ -478,6 +484,45 @@ export function parseExpiryDate(blocks: readonly Block[], opts: ParseOptions): P
     signals.push('multiple-candidates');
   }
 
+  const rejectedFor = (
+    candidate: Candidate,
+    chosen: Candidate | undefined,
+    production: Candidate | null,
+  ): string | null => {
+    if (!withinSanityWindow(toDate(candidate), referenceDate)) {
+      return `more than ${SANITY_WINDOW_YEARS} years from the reference date`;
+    }
+    if (candidate === chosen) {
+      return null;
+    }
+    if (candidate === production) {
+      return 'earlier of a pair, treated as the production date';
+    }
+    return 'not selected by the deciding rule';
+  };
+
+  const reportCandidates = (
+    chosen: Candidate | undefined,
+    production: Candidate | null,
+  ): ParseCandidate[] =>
+    candidates.map((candidate) => ({
+      raw: candidate.raw,
+      date: toIso(candidate),
+      rejectedFor: rejectedFor(candidate, chosen, production),
+    }));
+
+  if (eligibleCandidates.length === 0) {
+    return {
+      expiry: null,
+      productionDate: null,
+      rule: 'none',
+      ambiguous: candidates.some((candidate) => candidate.ambiguous),
+      confidence: { score: 0, signals },
+      candidates: reportCandidates(undefined, null),
+      referenceDate: referenceIso,
+    };
+  }
+
   const anchors = findAnchors(blocks);
 
   let rule: ParseRule;
@@ -487,7 +532,7 @@ export function parseExpiryDate(blocks: readonly Block[], opts: ParseOptions): P
   const anchorBoxes = anchors
     .map((anchor) => anchor.bbox)
     .filter((box): box is Box => box !== null);
-  const boxed = candidates.filter(
+  const boxed = eligibleCandidates.filter(
     (candidate): candidate is Candidate & { bbox: Box } => candidate.bbox !== null,
   );
 
@@ -509,16 +554,18 @@ export function parseExpiryDate(blocks: readonly Block[], opts: ParseOptions): P
     rule = 'anchor-proximity';
     chosen = nearest.candidate;
     signals.push('anchor-matched');
-  } else if (candidates.length > 1) {
+  } else if (eligibleCandidates.length > 1) {
     // The later date is the expiry and the earlier is the production date, which is reported rather
     // than thrown away - ADR-6.
-    const ordered = [...candidates].sort((a, b) => toDate(a).getTime() - toDate(b).getTime());
+    const ordered = [...eligibleCandidates].sort(
+      (a, b) => toDate(a).getTime() - toDate(b).getTime(),
+    );
     rule = 'latest-of-pair';
     chosen = ordered[ordered.length - 1];
     production = ordered[0] ?? null;
   } else {
     rule = 'sole-candidate';
-    chosen = candidates[0];
+    chosen = eligibleCandidates[0];
   }
 
   if (chosen === undefined) {
@@ -543,42 +590,7 @@ export function parseExpiryDate(blocks: readonly Block[], opts: ParseOptions): P
     signals.push('ambiguous-numeric');
   }
 
-  // The sanity window comes last and applies only to the chosen candidate - ADR-6. A date merely in
-  // the past survives it and is reported as `expired`, because "the engine read it correctly and
-  // the yoghurt is old" is a successful extraction - ADR-7.
   const chosenDate = toDate(chosen);
-  const implausible = !withinSanityWindow(chosenDate, referenceDate);
-
-  const rejectedFor = (candidate: Candidate): string | null => {
-    if (candidate === chosen && implausible) {
-      return `more than ${SANITY_WINDOW_YEARS} years from the reference date`;
-    }
-    if (candidate === chosen) {
-      return null;
-    }
-    if (candidate === production) {
-      return 'earlier of a pair, treated as the production date';
-    }
-    return 'not selected by the deciding rule';
-  };
-
-  const reported: ParseCandidate[] = candidates.map((candidate) => ({
-    raw: candidate.raw,
-    date: toIso(candidate),
-    rejectedFor: rejectedFor(candidate),
-  }));
-
-  if (implausible) {
-    return {
-      expiry: null,
-      productionDate: null,
-      rule: 'none',
-      ambiguous: chosen.ambiguous,
-      confidence: { score: 0, signals },
-      candidates: reported,
-      referenceDate: referenceIso,
-    };
-  }
 
   return {
     expiry: {
@@ -592,7 +604,7 @@ export function parseExpiryDate(blocks: readonly Block[], opts: ParseOptions): P
     rule,
     ambiguous: chosen.ambiguous,
     confidence: { score: score(signals), signals },
-    candidates: reported,
+    candidates: reportCandidates(chosen, production),
     referenceDate: referenceIso,
   };
 }
