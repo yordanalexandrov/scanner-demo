@@ -455,17 +455,18 @@ preserves ADR-10. **That option has since been closed by elimination:**
   **2.42 GB** against ~2.1 GB available with no swap and a live Postgres. §10.
 - **Tesseract's HTTP server reports no timing either** — 07b.
 
-So the decision at this checkpoint is between:
+Two options went to the checkpoint:
 
 1. **`engineMs` = the whole sidecar HTTP call, `engineMsScope: "inference+network"`.** Honest, and it
    makes `serverTotalMs - engineMs` the Fastify handler's own overhead rather than the process
    boundary, which must be said in the README.
-2. **The same, plus a one-off transport calibration** — the median of the smallest possible request,
-   recorded once in the README as an upper bound on what moving OCR in-process could save. This
-   preserves the *decision* ADR-10 exists to inform (is the process boundary worth removing?) without
-   claiming a per-request precision we do not have. **Recommended.**
+2. The same, plus a one-off transport calibration in the README as an upper bound on what moving OCR
+   in-process could save.
 
-Either way ADR-10 needs amending rather than quietly contradicting.
+**Decided 2026-07-31: option 1.** ADR-10 is amended accordingly and phase 07 item 19 is rewritten. The
+consequence to accept knowingly is that "is the process boundary worth removing?" — the question the
+specification's *§ Gotchas* line exists to answer — has no figure behind it in this harness. Nothing
+prevents measuring the transport deliberately later; it simply is not part of stage B.
 
 ---
 
@@ -535,9 +536,10 @@ ONNX threads left at the default **with a comment naming the two-core condition*
    given a path. The mount stays because the specification asks for it and because it is free, but the
    compose file should say plainly that it is presently unused.
 
-**Decisions requested at this checkpoint**
+**Decisions at this checkpoint**
 
-- **`engineMs`** — option 1 or option 2 of §9. Blocking; nothing can be written until it is settled.
+- **`engineMs` — settled 2026-07-31: option 1 of §9.** `engineMsScope: "inference+network"`, ADR-10
+  amended, phase 07 item 19 rewritten. Stage B is unblocked.
 - **Models:** keep the bundled PP-OCRv4 **mobile ch/en** as `onnx-paddleocr`. 7/10 against 3/10 for
   PP-OCRv5, 1/10 for Cyrillic, 1/10 for Tesseract and 7/10 for PaddleOCR server at five times the
   memory — and it is the fastest of all of them.

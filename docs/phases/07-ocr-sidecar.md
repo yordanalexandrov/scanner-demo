@@ -71,14 +71,29 @@ during stage A.
 18. `POST /api/v1/ocr/local` — `{ imageId }` → `OcrResponse`. The path is constructed from the image ID by
     the server; a client-supplied path never reaches a filesystem read.
     — *spec § Stack — Server*
-19. **The sidecar boundary is measured separately:** `engineMs` is time inside the container as it reports
-    it; `serverTotalMs` is wall time inside the Fastify handler. The difference is the process boundary.
+19. **`engineMs` is the whole sidecar call and says so.** ~~`engineMs` is time inside the container as it
+    reports it; the difference from `serverTotalMs` is the process boundary.~~ **Amended at the stage A
+    checkpoint on 2026-07-31:** the container reports no duration, and neither does any available
+    alternative — [the spike](../spikes/07-ocr-sidecar.md#9-the-stage-b-gate-there-is-no-inference-duration-and-no-alternative-that-has-one)
+    records the search. So `engineMs` is the Fastify handler's own measurement of the HTTP call to the
+    sidecar and `engineMsScope` is **`"inference+network"`**, not `"inference"`. `serverTotalMs` is still
+    wall time inside the handler, but `serverTotalMs - engineMs` is now the handler's own overhead
+    **outside** the call, not the process boundary — the boundary is inside `engineMs` and cannot be
+    separated from it. The README must say this next to the figure.
     — *spec § Gotchas*, [ADR-10](../decisions.md#adr-10--latency-segments-clocks-and-what-may-be-subtracted)
 20. **Mobile/lightweight PP-OCR detection and recognition models are selected explicitly**, not left to
     the image's default, wherever the spike showed the choice is available. On printed dates the accuracy
     difference is small and the latency difference is large. The selected model names go in the README.
     — *spec § Gotchas*
 21. The "Self-hosted" method button in the app is enabled and wired to this endpoint.
+22. **Carried over from phase 06: `imageListQuerySchema` becomes a `z.strictObject`.** It is a plain
+    `z.object` today, so zod strips query parameters it does not know. Against a server older than the app
+    that turns every new filter into a silent no-op: verified on 2026-07-30, a deployed server five commits
+    behind answered `?captureGroupId=does-not-exist` with a full page of rows instead of an error, so the
+    grid looked like it was filtering and was not. A filter that lies is worse than one that fails, and the
+    upload metadata is already strict for the same reason.
+    — [ADR-3](../decisions.md#adr-3--images-are-stored-in-two-variants-linked-by-capturegroupid), agreed at
+    phase 06's review
 
 ## Out of scope
 

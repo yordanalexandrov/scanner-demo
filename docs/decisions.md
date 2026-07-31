@@ -391,10 +391,13 @@ specification also asks for the sidecar's process boundary to be measured separa
   [ADR-22](#adr-22--totalms-starts-at-the-method-invocation):** it starts at the invocation of the method,
   and the capture segments are reported alongside it rather than inside it.
 - The server reports two figures inside every `OcrResponse`:
-  - `engineMs` — time inside the recognition engine itself.
+  - `engineMs` — time inside the recognition engine, **as far as that engine allows it to be
+    isolated**; `engineMsScope` says how far that is. See the amendment below.
   - `serverTotalMs` — wall time inside the Fastify handler.
-  The sidecar's process-boundary cost is `serverTotalMs - engineMs`. Both come from the same clock, so
-  that subtraction is valid; it is computed for display and not stored.
+  Both come from the same clock, so `serverTotalMs - engineMs` is a valid subtraction; it is computed
+  for display and not stored. **What it means depends on `engineMsScope`** — for an engine reporting
+  `inference` it is the process boundary, and for one reporting `inference+network` it is only the
+  handler's own work outside the call.
 - **No value measured on the phone is ever subtracted from a value measured on the server.** The one
   quantity that spans both is network time, and it is reported as an estimate derived from two stored
   fields — `timing.requestMs` (the phone's round trip) minus `ocr.serverTotalMs` — labelled as such and
@@ -405,9 +408,10 @@ specification also asks for the sidecar's process boundary to be measured separa
   `downloadMs`, `requestMs`, `parseMs`, and ML Kit's local `engineMs` — account for `totalMs` without
   double-counting server fields already nested inside `requestMs`.
 - `engineMs` is not equally meaningful across engines, so every `OcrResponse` declares its scope:
-  `engineMsScope: "inference" | "inference+network"`. The sidecar and ML Kit report `inference`; GCV and
-  the VLM report `inference+network`, because their SDKs expose no way to separate the two. Any chart
-  comparing `engineMs` across engines must show this, or it is comparing different things.
+  `engineMsScope: "inference" | "inference+network"`. **ML Kit reports `inference`; the sidecar, GCV and
+  the VLM report `inference+network`** — the cloud SDKs expose no way to separate the two, and the
+  sidecar turns out not to either. Any chart comparing `engineMs` across engines must show this, or it
+  is comparing different things.
 
 **Rationale.** The stated purpose is trustworthy numbers. Cross-clock subtraction produces figures that
 look precise and are not, and an unlabelled `engineMs` invites a comparison between a local inference time
@@ -417,7 +421,33 @@ and a transatlantic round trip.
 are not comparable with the sidecar's without that caveat, and the History export carries `engineMsScope`
 so the caveat survives export.
 
-**Status.** Proposed.
+**Amendment, 2026-07-31 — the sidecar cannot report `inference`.** This ADR assumed the OCR container
+would report its own inference duration. It does not, and neither does any usable alternative. The
+phase 07 spike traced the cause: `rapidocr` computes `elapse_list` for detection, classification and
+recognition, and `rapidocr_api` builds a fresh response object from three fields and drops it. There is
+no route option that preserves it, and parsing container logs is not a substitute — no request
+correlation under concurrency, and the image logs no durations anyway. The search for an image that
+does report it came up empty: `rapidocr_api` 0.2.0 is the final release of that package,
+`jarvis1tube/paddleocr-server` reports no timing either and peaks at 2.42 GB against ~2.1 GB available
+on the deployment box, and Tesseract's HTTP server reports none. See
+[the spike](spikes/07-ocr-sidecar.md#9-the-stage-b-gate-there-is-no-inference-duration-and-no-alternative-that-has-one).
+
+So the self-hosted path measures the whole HTTP call from inside the Fastify handler and labels it
+`engineMsScope: "inference+network"`. **The process boundary is inside `engineMs` and cannot be
+separated from it**, which retires the specification's request to measure it per request. The README
+must say so next to the figure, because a reader who assumes otherwise will read
+`serverTotalMs - engineMs` as a boundary cost when it is the handler's own work outside the call.
+
+A variant that added a one-off transport calibration to the README — the median round trip of the
+smallest possible request, as an upper bound on what moving OCR in-process could save — was considered
+at the checkpoint and **not adopted**. The consequence is that "is the process boundary worth
+removing?" has no figure behind it in this harness; answering it later means measuring the transport
+deliberately, which nothing here prevents.
+
+The alternative was to keep `"inference"` and let it mean something it does not. A figure that looks
+precise and is not is the specific failure this project exists to avoid.
+
+**Status.** Proposed; amended 2026-07-31 at the phase 07 stage A checkpoint.
 
 ---
 
