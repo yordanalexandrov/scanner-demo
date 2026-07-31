@@ -204,6 +204,13 @@ Three things worth carrying forward regardless:
 1. **The failure is localisation, not language.** If the self-hosted path is ever revisited, the lever
    is a better *detector* or a better-framed input, not a better recogniser or a different dictionary.
    That also retires the intuition — mine included — that Cyrillic support was the gap.
+
+   Since this was written, the three images both engines fail on were examined pixel by pixel and turn
+   out to share one property: **the date is dot-matrix inkjet**, and the ones both engines read are
+   continuous-glyph prints. Tesseract's 1/10 and RapidOCR's 7/10 are the same finding seen from two
+   distances — RapidOCR's detector rescues the easy cases, and neither engine touches the hard ones.
+   Four engines have now read 0 of 3 dot-matrix dates; see §7 and §10 of
+   [07-ocr-sidecar.md](07-ocr-sidecar.md).
 2. **`tessdata_fast` is genuinely fast and genuinely accurate on located lines**: 0.272 s per crop and
    a clean `07/2027`. If a future phase ever crops to a region of interest — a user-drawn box, a
    detector, a second pass over an anchor's neighbourhood — Tesseract at 85 MiB is a strong candidate

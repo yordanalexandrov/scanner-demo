@@ -1,6 +1,6 @@
 # Phase 07 — Self-hosted OCR engine (sidecar container)
 
-**Status:** not started · **Depends on:** 02, 06 · **Source:** spec milestone 7
+**Status:** stage A complete; awaiting review · **Depends on:** 02, 06 · **Source:** spec milestone 7
 
 ## Goal
 
