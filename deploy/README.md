@@ -154,6 +154,21 @@ Migrations are applied at boot by the server itself, from the committed `server/
 named volumes are untouched by `down`/`up`; only `docker compose down -v` would destroy the dataset,
 and there is no reason to ever run it here.
 
+**Do this after every phase that touches `server/`, and check it before trusting any measurement.**
+An app newer than the box does not fail loudly, it fails quietly in two different ways, both seen on
+2026-07-30 when the box was still on phase 02 while the app was on phase 06:
+
+- A route the phase added is simply absent, so `POST /api/v1/attempts` answered `404 No such route`
+  and every capture uploaded its image and then lost its measurement. The app surfaces that rather
+  than swallowing it ([ADR-15](../docs/decisions.md#adr-15--the-app-is-the-sole-author-of-attempt-rows)),
+  so it shows up as an error on the result screen — read it, do not dismiss it.
+- A query parameter the phase added is **silently ignored**, because `imageListQuerySchema` strips
+  unknown keys. `?captureGroupId=<anything>` returned a full page instead of a group, so the Library
+  appeared to filter and did not. Phase 07 makes that schema strict so it answers 400 instead.
+
+`curl -sS https://scanner.yo-po.eu/api/v1/health` reports `uptimeMs`; a value in days after a phase
+landed means the box is behind.
+
 ## Known build constraints
 
 - **`better-sqlite3` is pinned to 12.x.** 12.x publishes a prebuilt binding for Node 22's ABI
