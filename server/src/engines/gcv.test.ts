@@ -278,6 +278,26 @@ describe('the Cloud Vision adapter', () => {
     expect((failure as OcrEngineError).timedOut).toBe(false);
   });
 
+  it('does not file a project problem as a credential one', async () => {
+    // What the first real call against the API produced: PERMISSION_DENIED because billing was off,
+    // which is a setting on the project and not a fact about the key. Recording it as "the
+    // credentials were rejected" would put the wrong reason in the attempt row - and Google's own
+    // sentence, which names the project and the fix, is the part worth keeping.
+    const denied = Object.assign(
+      new Error('7 PERMISSION_DENIED: This API method requires billing to be enabled.'),
+      { code: 7 },
+    );
+
+    const failure = await engine(() => Promise.reject(denied))
+      .recognise({ imageId: 'an-id', path: imagePath })
+      .catch((error: unknown) => error);
+
+    expect((failure as OcrEngineError).message).toContain('PERMISSION_DENIED');
+    expect((failure as OcrEngineError).message).toContain('requires billing');
+    expect((failure as OcrEngineError).message).not.toContain('rejected the credentials');
+    expect((failure as OcrEngineError).timedOut).toBe(false);
+  });
+
   it('names a missing key file rather than surfacing a bare ENOENT', async () => {
     const missing = new Error("ENOENT: no such file or directory, open '/secrets/gcv.json'");
 

@@ -366,16 +366,26 @@ function classify(error: unknown, timeoutMs: number): OcrEngineError {
     });
   }
 
-  // UNAUTHENTICATED and PERMISSION_DENIED, plus the auth library's own failures, which arrive with
-  // an unrelated code or none at all: a key file whose contents are malformed surfaces as
+  // UNAUTHENTICATED, plus the auth library's own failures, which arrive with an unrelated code or
+  // none at all: a key file whose contents are malformed surfaces as
   // `2 UNKNOWN: Getting metadata from plugin failed…`, which is a credential problem wearing a
   // transport error's clothes. Measured, not guessed - see the note in `realAnnotate`.
   if (
     code === 16 ||
-    code === 7 ||
     /credential|ENOENT|invalid_grant|API key|metadata from plugin/iu.test(message)
   ) {
     return new OcrEngineError(`Cloud Vision rejected the credentials: ${message}`, {
+      cause: error,
+    });
+  }
+
+  // PERMISSION_DENIED is **not** the same fact as a bad key, and calling it one would file the wrong
+  // reason in the attempt row. It also covers billing being off on the project, the API not being
+  // enabled, and a key belonging to a different project - all of which the first run against the
+  // real API on 2026-08-03 produced: "This API method requires billing to be enabled". So the code
+  // is named and Google's own sentence is kept verbatim, which is the part an operator can act on.
+  if (code === 7) {
+    return new OcrEngineError(`Cloud Vision refused the call (PERMISSION_DENIED): ${message}`, {
       cause: error,
     });
   }
