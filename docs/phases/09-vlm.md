@@ -1,6 +1,6 @@
 # Phase 09 — VLM engine
 
-**Status:** not started · **Depends on:** 06, 07 · **Source:** spec milestone 9
+**Status:** implemented, awaiting review · **Depends on:** 06, 07 · **Source:** spec milestone 9
 
 ## Goal
 
@@ -14,8 +14,10 @@ whole harness exists to make possible.
 
 1. `VlmProvider` interface with a single method, and `OpenAiProvider` as the only implementation for now.
    The provider is selected by an environment variable. — *spec § Stack — Server*
-2. `POST /api/v1/ocr/vlm` — `{ imageId }` → `OcrResponse` **plus** `parsedDate` and `modelReasoning`.
-   — *spec § Server API*
+2. `POST /api/v1/ocr/vlm` — `{ imageId }` → `OcrResponse` **plus** `parsedDate`, `modelReasoning` and
+   `promptVersion`. The third was not in the original sketch and has to be there: the prompt lives on
+   the server and the app is the sole author of attempt rows, so item 10 below is unsatisfiable
+   without it — *spec § Server API*, [ADR-24](../decisions.md#adr-24--the-vlm-response-carries-its-prompt-version-and-the-endpoint-declares-its-own-schema)
 3. The model is prompted to return **both** its own structured answer **and** the raw text it read.
    Both are recorded. — *spec § Date parsing*
 4. The shared parser is additionally run over the VLM's raw text, on the phone like every other method.
@@ -58,17 +60,24 @@ server/src/vlm/
 └── index.ts                          # provider selection from env
 server/src/engines/vlm.ts             # adapts VlmProvider to OcrEngine
 server/src/routes/ocr.ts              # + POST /api/v1/ocr/vlm
-server/.env.example                   # + VLM_PROVIDER, VLM_MODEL, OPENAI_API_KEY
+server/.env.example                   # + VLM_PROVIDER, VLM_MODEL, VLM_TIMEOUT_MS, OPENAI_API_KEY
+packages/shared/src/schemas/ocr.ts    # + vlmOcrResponseSchema — ADR-24
 packages/shared/src/pricing.ts        # + real OpenAI prices, source URL, retrieval date
 app/src/components/MethodButtons.tsx  # VLM button enabled
+app/src/screens/ResultScreen.tsx      # model answer beside parser answer
 ```
+
+The `.env.example` written in an earlier phase reserved `OPENAI_MODEL`. It is `VLM_MODEL`, as this
+document's deliverables and criterion 9 say: a provider-specific model variable would make adding a
+provider a change to `server/src/env.ts` as well, and criterion 4 requires that it is not.
 
 ## Key decisions
 
 [ADR-4](../decisions.md#adr-4--bbox-is-nullable-and-the-parser-records-which-rule-decided) ·
 [ADR-10](../decisions.md#adr-10--latency-segments-clocks-and-what-may-be-subtracted) ·
 [ADR-11](../decisions.md#adr-11--cost-estimates-come-from-a-versioned-price-table) ·
-[ADR-15](../decisions.md#adr-15--the-app-is-the-sole-author-of-attempt-rows)
+[ADR-15](../decisions.md#adr-15--the-app-is-the-sole-author-of-attempt-rows) ·
+[ADR-24](../decisions.md#adr-24--the-vlm-response-carries-its-prompt-version-and-the-endpoint-declares-its-own-schema)
 
 ## Interfaces
 
@@ -90,7 +99,7 @@ export type VlmResult = {
 ```
 
 ```
-POST /api/v1/ocr/vlm   { imageId } → OcrResponse & { parsedDate, modelReasoning }
+POST /api/v1/ocr/vlm   { imageId } → OcrResponse & { parsedDate, modelReasoning, promptVersion }
 ```
 
 The prompt is versioned alongside the model, because a prompt change alters results exactly as a model

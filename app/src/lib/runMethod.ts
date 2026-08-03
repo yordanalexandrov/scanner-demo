@@ -15,9 +15,10 @@ import type {
   OcrResponse,
   ParseResult,
   Timing,
+  VlmAnswer,
 } from '@scanner-demo/shared';
 import { createAttempt } from '../api/attempts';
-import { recogniseWithGcv, recogniseWithSelfHostedOcr } from '../api/ocr';
+import { recogniseWithGcv, recogniseWithSelfHostedOcr, recogniseWithVlm } from '../api/ocr';
 import { describeDevice } from '../device';
 import { recogniseWithMlKit } from './mlkit';
 
@@ -88,6 +89,18 @@ interface Recognised {
   ocr: OcrResponse | null;
   requestMs: Millis | null;
   error: string | null;
+  /**
+   * The model's own structured answer - the VLM path only, `null` on every other.
+   *
+   * It sits beside `ocr` rather than inside it because it is a different kind of claim: `ocr` is
+   * what an engine read, this is what a model concluded. Keeping both is the comparison phase 09
+   * exists to make - how much of a VLM's advantage is better reading and how much is better
+   * interpretation - and it is only answerable with the shared parser's reading of the same raw
+   * text stored next to it, which `record` below produces for every method identically.
+   */
+  vlm?: VlmAnswer | null;
+  /** The server-side prompt that produced `vlm`. The phone cannot know it otherwise - ADR-24. */
+  promptVersion?: string | null;
 }
 
 /**
@@ -143,13 +156,15 @@ async function record(
     device: DEVICE,
     ocr,
     parse,
-    vlm: null,
+    // Both `null` on the three methods that have no model and no prompt. `null` is "not applicable
+    // on this path", which is the only honest value for a field the method cannot produce.
+    vlm: recognised.vlm ?? null,
     timing,
     referenceDate: input.referenceDate.toISOString().slice(0, 10),
     parserVersion: PARSER_VERSION,
     timingVersion: TIMING_VERSION,
     pricingVersion: PRICING_VERSION,
-    promptVersion: null,
+    promptVersion: recognised.promptVersion ?? null,
     error,
   };
 
@@ -208,11 +223,17 @@ export async function runMlKit(input: RunMethodInput): Promise<RunMethodResult> 
  * One function for all of them, because `requestMs` has to start at the same point and a failure has
  * to become a row on every one of them. The engine is the only thing that differs.
  */
-async function runOnServer(
+async function runOnServer<TResponse extends OcrResponse>(
   input: RunMethodInput,
   method: Method,
-  recognise: (imageId: string) => Promise<OcrResponse>,
+  recognise: (imageId: string) => Promise<TResponse>,
   failureMessage: string,
+  /**
+   * What this method records beyond the shared response. Only the VLM has anything, and it is a
+   * parameter rather than a branch inside so that adding it did not give the VLM its own
+   * orchestration path - `requestMs` still starts at the same point for all three - ADR-15.
+   */
+  beyondOcr: (ocr: TResponse) => Pick<Recognised, 'vlm' | 'promptVersion'> = () => ({}),
 ): Promise<RunMethodResult> {
   let recognised: Recognised;
 
@@ -223,7 +244,7 @@ async function runOnServer(
 
   try {
     const ocr = await recognise(input.sourceImageId);
-    recognised = { ocr, requestMs: elapsed(requestedAt), error: null };
+    recognised = { ocr, requestMs: elapsed(requestedAt), error: null, ...beyondOcr(ocr) };
   } catch (failure: unknown) {
     recognised = {
       ocr: null,
@@ -257,16 +278,38 @@ export function runGcv(input: RunMethodInput): Promise<RunMethodResult> {
 }
 
 /**
+ * The VLM, called by the server on this app's behalf - phase 09.
+ *
+ * **The one method that separates reading from interpretation**, and the attempt therefore carries
+ * three things rather than two: the model's own answer, the raw text it says it read, and the
+ * shared parser's reading of that same raw text. The third comes for free - `record` runs the
+ * parser over `ocr.blocks` on this path exactly as it does on the other three, on the same CPU with
+ * the same code - which is precisely what makes the first two comparable with anything.
+ *
+ * `promptVersion` is stored beside them because a prompt change alters results the way a model
+ * change does. It comes off the response rather than out of a constant here: the prompt lives on
+ * the server, and a copy of its version in the app would be a second thing to keep in step - ADR-24.
+ */
+export function runVlm(input: RunMethodInput): Promise<RunMethodResult> {
+  return runOnServer(input, 'vlm', recogniseWithVlm, 'The VLM failed to read the image', (ocr) => ({
+    vlm: { parsedDate: ocr.parsedDate, modelReasoning: ocr.modelReasoning },
+    promptVersion: ocr.promptVersion,
+  }));
+}
+
+/**
  * The methods a run can dispatch to, by name.
  *
  * A table rather than a chain of ternaries at each call site: the capture screen and the Library
  * both dispatch, and a method added to one and forgotten in the other is a silent gap in the
- * comparison. `vlm` arrives with phase 09 and is absent here until it does.
+ * comparison. It stays `Partial` because `onnx-paddleocr-cyrillic` is a configuration of the
+ * sidecar rather than a fourth runner - ADR-12.
  */
 const RUNNERS: Partial<Record<Method, (input: RunMethodInput) => Promise<RunMethodResult>>> = {
   mlkit: runMlKit,
   'onnx-paddleocr': runLocalOcr,
   gcv: runGcv,
+  vlm: runVlm,
 };
 
 /**

@@ -40,6 +40,61 @@ function formatCost(usd: number | null): string {
   return `$${usd.toFixed(usd !== 0 && Math.abs(usd) < 0.01 ? 5 : 2)}`;
 }
 
+/**
+ * The two answers, side by side, labelled so neither can be mistaken for the other - criterion 3.
+ *
+ * **They are answers to different questions and the layout has to say so.** The left column is what
+ * the model concluded from the picture; the right is what the shared parser made of the text that
+ * same model says it read. Every other method has only the right column. Where the two disagree the
+ * disagreement is the finding - a model that returns a confident date it did not actually read is
+ * exactly what this view exists to make visible, and it is only visible because both are kept.
+ *
+ * Rendered for the VLM path alone: `attempt.vlm` is `null` everywhere else, which is "not
+ * applicable on this path" rather than "no date found", and showing an empty column for it would
+ * read as the latter.
+ */
+function ModelAnswer({ attempt }: { attempt: Attempt }) {
+  if (attempt.vlm === null) {
+    return null;
+  }
+
+  const model = attempt.vlm;
+  const parser = attempt.parse?.expiry?.date ?? null;
+  // Compared only to label the row. Neither answer is corrected towards the other, and the stored
+  // attempt keeps both regardless of what this says.
+  const agree = model.parsedDate === parser;
+
+  return (
+    <View style={styles.section}>
+      <Text style={styles.label}>Model answer vs parser answer</Text>
+
+      <View style={styles.compareRow}>
+        <View style={styles.compareCell}>
+          <Text style={styles.compareHeading}>The model&apos;s own answer</Text>
+          <Text style={styles.compareValue}>{model.parsedDate ?? 'no date'}</Text>
+          <Text style={styles.caption}>prompt {attempt.promptVersion ?? 'n/a'}</Text>
+        </View>
+
+        <View style={styles.compareCell}>
+          <Text style={styles.compareHeading}>Shared parser, same raw text</Text>
+          <Text style={styles.compareValue}>{parser ?? 'no date'}</Text>
+          <Text style={styles.caption}>parser {attempt.parserVersion}</Text>
+        </View>
+      </View>
+
+      <Text style={[styles.caption, !agree && styles.disagree]}>
+        {agree
+          ? 'reading and interpretation agree'
+          : 'they disagree — which half differs is the measurement'}
+      </Text>
+
+      <Text style={styles.caption} selectable>
+        {model.modelReasoning === '' ? 'the model gave no reasoning' : model.modelReasoning}
+      </Text>
+    </View>
+  );
+}
+
 function ParsedDate({ attempt }: { attempt: Attempt }) {
   const parse = attempt.parse;
 
@@ -115,8 +170,18 @@ function AttemptCard({ attempt, showCaptureCost }: { attempt: Attempt; showCaptu
         {attempt.ocr !== null && ` · ${attempt.ocr.imageWidth}×${attempt.ocr.imageHeight}`}
       </Text>
       <Text style={styles.caption}>
-        parser {attempt.parserVersion} · timing {attempt.timingVersion}
+        parser {attempt.parserVersion} · timing {attempt.timingVersion} · pricing{' '}
+        {attempt.pricingVersion}
       </Text>
+
+      {attempt.ocr?.usage != null && (
+        // Shown next to the cost because the cost is computed from exactly these two numbers and
+        // the price table at `pricingVersion` above. That is what makes the figure auditable rather
+        // than something the harness asserts about itself - phase 09 criterion 5, ADR-11.
+        <Text style={styles.caption}>
+          {attempt.ocr.usage.inputTokens} in / {attempt.ocr.usage.outputTokens} out tokens
+        </Text>
+      )}
 
       {attempt.error !== null && <Text style={styles.failure}>{attempt.error}</Text>}
 
@@ -127,6 +192,8 @@ function AttemptCard({ attempt, showCaptureCost }: { attempt: Attempt; showCaptu
       />
 
       <ParsedDate attempt={attempt} />
+
+      <ModelAnswer attempt={attempt} />
 
       <View style={styles.section}>
         <Text style={styles.label}>Confidence reported by the engine</Text>
@@ -256,6 +323,13 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   dateRow: { alignItems: 'baseline', flexDirection: 'row', gap: spacing.sm },
+  compareRow: { flexDirection: 'row', gap: spacing.md },
+  // Equal halves rather than one column wrapping under the other: whichever answer is longer must
+  // not become the one that looks like the result.
+  compareCell: { flex: 1, gap: spacing.xs },
+  compareHeading: { color: colors.textMuted, fontSize: 11, lineHeight: 15 },
+  compareValue: { color: colors.text, fontSize: 17, fontWeight: '700' },
+  disagree: { color: colors.accent },
   date: { color: colors.text, fontSize: 22, fontWeight: '700' },
   status: { color: colors.online, fontSize: 13, fontWeight: '600', textTransform: 'uppercase' },
   expired: { color: colors.offline },

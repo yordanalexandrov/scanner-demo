@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ocrResponseSchema } from './ocr.js';
+import { ocrResponseSchema, vlmAnswerSchema } from './ocr.js';
 import { parseResultSchema } from './parse.js';
 import { imageVariantSchema } from './image.js';
 import { parserVersionSchema } from '../parserVersion.js';
@@ -47,14 +47,6 @@ export const timingSchema = z.object({
 });
 
 export type Timing = z.infer<typeof timingSchema>;
-
-/** The VLM's own structured answer, kept beside the parser's answer rather than instead of it. */
-export const vlmAnswerSchema = z.object({
-  parsedDate: z.string().nullable(),
-  modelReasoning: z.string(),
-});
-
-export type VlmAnswer = z.infer<typeof vlmAnswerSchema>;
 
 /**
  * One run of one method against one image. The app is the sole author of these rows - ADR-15.

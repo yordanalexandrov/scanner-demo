@@ -57,3 +57,44 @@ export const ocrResponseSchema = z.object({
 });
 
 export type OcrResponse = z.infer<typeof ocrResponseSchema>;
+
+/**
+ * The VLM's own structured answer, kept beside the parser's answer rather than instead of it.
+ *
+ * **This is the one comparison the whole harness exists to make possible.** Every other engine
+ * reads; this one reads *and* interprets. Recording only its answer would hide which half of any
+ * advantage is which, and recording only the shared parser's reading of its raw text would throw
+ * away the interpretation entirely. Both are stored, on one attempt row - phase 09 item 4, ADR-15.
+ *
+ * It lives here rather than in `attempt.ts` because it is a property of the response first: the VLM
+ * endpoint returns these fields, and the attempt merely carries them. One definition, so the field
+ * the server sends cannot drift from the field the app stores.
+ */
+export const vlmAnswerSchema = z.object({
+  /** ISO `yyyy-mm-dd`, or `null` when the model found no date. Never a guess - phase 09 item 6. */
+  parsedDate: z.string().nullable(),
+  modelReasoning: z.string(),
+});
+
+export type VlmAnswer = z.infer<typeof vlmAnswerSchema>;
+
+/**
+ * What `POST /api/v1/ocr/vlm` returns: an `OcrResponse` plus the model's own reading of it.
+ *
+ * **`promptVersion` travels on the response, which the phase document's sketch does not show.** It
+ * has to: the app is the sole author of attempt rows - ADR-15 - and the prompt lives on the server,
+ * so the phone cannot record which prompt produced a result unless it is told. Without it, phase 09
+ * criterion 10 - attempts before and after a prompt change are distinguishable in the export - is
+ * unsatisfiable by construction. It is a sibling field rather than part of `engine` because the
+ * engine string is the price-table key and overloading it would break the cost lookup - ADR-24.
+ *
+ * A separate schema rather than optional fields on `ocrResponseSchema`: the serialiser validates
+ * every response against the schema its route declares, and optional fields there would let any
+ * engine quietly ship a `parsedDate` that nothing checks.
+ */
+export const vlmOcrResponseSchema = ocrResponseSchema.extend({
+  ...vlmAnswerSchema.shape,
+  promptVersion: z.string(),
+});
+
+export type VlmOcrResponse = z.infer<typeof vlmOcrResponseSchema>;

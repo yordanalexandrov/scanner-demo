@@ -39,6 +39,7 @@ had to resolve to be executable. One record per decision.
 | [21](#adr-21--candidate-boundaries-and-the-order-of-the-sanity-window) | Candidate boundaries; sanity window filters before the rule | Accepted | 06b, amends 6 and 16 |
 | [22](#adr-22--totalms-starts-at-the-method-invocation) | `totalMs` starts at the method invocation | Accepted | 06b, amends 10 |
 | [23](#adr-23--a-date-with-no-year-is-not-a-date) | A date with no year is not a date | **Deviation** | amends 6 and 16 |
+| [24](#adr-24--the-vlm-response-carries-its-prompt-version-and-the-endpoint-declares-its-own-schema) | The VLM response carries `promptVersion`; the endpoint declares its own schema | Proposed | 09, amends 15 |
 
 **Rule names, not rule numbers.** The specification numbers its disambiguation rules 1–4;
 [ADR-6](#adr-6--parser-rule-order-and-referencedate) inserts extraction as a step and renumbers them. To
@@ -1077,3 +1078,59 @@ reports no date instead of a fabricated one.
 
 **Status.** Accepted 2026-08-03, on the owner's decision after the case above was traced to the
 pixels.
+
+---
+
+## ADR-24 — The VLM response carries its prompt version, and the endpoint declares its own schema
+
+**Context.** Phase 09 sketches the VLM endpoint as
+`POST /api/v1/ocr/vlm { imageId } → OcrResponse & { parsedDate, modelReasoning }`, and separately
+requires (item 10, criterion 10) that `promptVersion` is recorded on every attempt and that attempts
+recorded before and after a prompt change are distinguishable in the export without consulting the git
+history.
+
+Those two statements cannot both hold as written. The prompt lives on the server — that is the whole
+point of a prompt file with a version constant — and under
+[ADR-15](#adr-15--the-app-is-the-sole-author-of-attempt-rows) the **app** is the sole author of attempt
+rows. The phone therefore cannot fill in `promptVersion` unless the server tells it. Left as sketched,
+the field would be `null` on every VLM attempt, or the app would carry its own copy of a constant that
+lives on the other side of the wire — two definitions of one value, which is the failure mode
+`packages/shared` exists to prevent.
+
+A second, smaller problem sits underneath it. The OCR routes are one handler registered once per
+endpoint, and `fastify-type-provider-zod` serialises each response through the schema its route
+declares. A zod object strips what it does not name. With a single shared `ocrResponseSchema` on all
+three routes, `parsedDate`, `modelReasoning` and `promptVersion` are dropped on the way out, the
+endpoint still answers `200`, and the omission is invisible from the outside.
+
+**Decision.** Two additions, both narrow:
+
+1. `POST /api/v1/ocr/vlm` returns `OcrResponse & { parsedDate, modelReasoning, promptVersion }`. The
+   shape is `vlmOcrResponseSchema` in `packages/shared`, defined once as `ocrResponseSchema.extend(…)`
+   and imported by the server that sends it and the app that stores it.
+2. `OcrEndpoint` carries the response schema its engine actually returns, defaulting to
+   `ocrResponseSchema`. The VLM route declares the wider one; the other two do not.
+
+`promptVersion` stays a sibling field rather than a suffix on `engine`. The engine string is the
+price-table key — [ADR-11](#adr-11--cost-estimates-come-from-a-versioned-price-table) — and appending a
+prompt version to it would mean a price entry per prompt, so a prompt change would silently produce
+attempts with an unknown cost.
+
+**Rationale.** This is the same argument ADR-15 already makes about `engineMs` and `serverTotalMs`: a
+value only one side can know is reported by that side and carried, never re-derived by the other. The
+alternative — the server writing the attempt row for this one method — is the thing ADR-15 rejects, and
+it would cost the comparability of `parseMs` across the four methods.
+
+Declaring the schema per endpoint rather than widening the shared one is what keeps the extra fields
+*off* the other three methods. An optional `parsedDate` on `ocrResponseSchema` would let any engine ship
+one that nothing validates, and the harness would quietly gain a column that means different things in
+different rows.
+
+**Consequences.** `OcrEngine` becomes generic in its response type, constrained to extend `OcrResponse`,
+so every field the comparison rests on is still present on every engine. Adding a future method that
+returns more than an `OcrResponse` is one schema in `packages/shared` and one line on its endpoint.
+
+The phase document's interface sketch is now incomplete rather than wrong; it has been updated to show
+the third field, with a pointer here.
+
+**Status.** Proposed.

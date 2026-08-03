@@ -9,9 +9,11 @@ import { colors, radius, spacing } from '../theme';
  * methods are meant to be evaluated one at a time and watched while they run; a batch action
  * appears once the methods have been evaluated separately, in the Library, in phase 06.
  *
- * The server methods that have no phase yet are present but disabled, each naming the phase that
- * turns it on. Absent buttons would leave the screen looking finished when it is not, and would
- * hide the fact that the comparison is a comparison of four.
+ * The `unavailable` field is what let the screen show a method whose phase had not landed: present
+ * but disabled, naming the phase that would turn it on, because absent buttons would have left the
+ * screen looking finished when it was not. All four are live from phase 09; the field stays because
+ * it is how a fifth method would be introduced, and because removing it would delete the only place
+ * that records that the comparison is a comparison of four.
  */
 
 export interface MethodDescriptor {
@@ -25,7 +27,7 @@ export const METHODS: readonly MethodDescriptor[] = [
   { method: 'mlkit', label: 'ML Kit · on-device', unavailable: null },
   { method: 'onnx-paddleocr', label: 'Self-hosted OCR', unavailable: null },
   { method: 'gcv', label: 'Google Cloud Vision', unavailable: null },
-  { method: 'vlm', label: 'VLM', unavailable: 'Phase 09' },
+  { method: 'vlm', label: 'VLM', unavailable: null },
 ];
 
 export interface MethodButtonsProps {

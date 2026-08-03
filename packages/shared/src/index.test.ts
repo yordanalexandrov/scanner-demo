@@ -17,6 +17,8 @@ import {
   parserVersionSchema,
   pricing,
   timingVersionSchema,
+  tokenCostUsd,
+  vlmOcrResponseSchema,
 } from './index.js';
 
 describe('shared contracts', () => {
@@ -43,6 +45,47 @@ describe('shared contracts', () => {
         blocks: [{ text: 'x', bbox: null, confidence: 1.4 }],
       }).success,
     ).toBe(false);
+  });
+
+  it('carries the model answer and the prompt version on the VLM response only', () => {
+    const base = {
+      engine: 'vlm:openai/gpt-5.4-mini',
+      rawText: 'BEST BEFORE\n31.12.2027',
+      blocks: [
+        // No geometry, which is the normal case for this engine: the parser falls through to
+        // `latest-of-pair` or `sole-candidate` and records which rule decided - ADR-4.
+        { text: 'BEST BEFORE', bbox: null, confidence: null },
+        { text: '31.12.2027', bbox: null, confidence: null },
+      ],
+      engineMs: 3120,
+      engineMsScope: 'inference+network',
+      serverTotalMs: null,
+      imageWidth: 1200,
+      imageHeight: 1600,
+      usage: { inputTokens: 1842, outputTokens: 96 },
+      costEstimateUsd: 0.0018135,
+      pricingVersion: PRICING_VERSION,
+    };
+
+    const parsed = vlmOcrResponseSchema.parse({
+      ...base,
+      parsedDate: '2027-12-31',
+      modelReasoning: 'The packaging prints BEST BEFORE above 31.12.2027.',
+      promptVersion: 'prompt-v1',
+    });
+
+    expect(parsed.parsedDate).toBe('2027-12-31');
+    expect(parsed.promptVersion).toBe('prompt-v1');
+
+    // The three extra fields are required here and absent from the base contract. A VLM response
+    // that lost `promptVersion` in transit must fail rather than arrive as an attempt nobody can
+    // attribute to a prompt - phase 09 criterion 10, ADR-24.
+    expect(vlmOcrResponseSchema.safeParse(base).success).toBe(false);
+    // And no other engine may ship these fields: `ocrResponseSchema` strips them, so a `parsedDate`
+    // on the GCV route would silently disappear instead of looking like a model answer.
+    expect(ocrResponseSchema.parse({ ...base, parsedDate: '2027-12-31' })).not.toHaveProperty(
+      'parsedDate',
+    );
   });
 
   it('prices what it knows and says nothing about what it does not', () => {
@@ -72,6 +115,45 @@ describe('shared contracts', () => {
     expect(imageCostUsd('onnx-paddleocr')).toBe(0);
     // An engine with no entry at all is unknown, and unknown is `null` rather than free.
     expect(imageCostUsd('vlm:openai/not-yet')).toBeNull();
+    // A token-priced engine has no per-image price at all. It must not fall through to a zero.
+    expect(imageCostUsd('vlm:openai/gpt-5.4-mini')).toBeNull();
+  });
+
+  it('re-derives a token cost from the usage stored on the attempt', () => {
+    // The figure an export has to be able to reproduce: 1,842 input and 96 output tokens at
+    // $0.75/$4.50 per 1M. Computed the long way here on purpose - a test that called the same
+    // helper twice would only prove the helper is deterministic - phase 09 criterion 5.
+    const usage = { inputTokens: 1842, outputTokens: 96 };
+    const expected = (1842 * 0.75 + 96 * 4.5) / 1_000_000;
+
+    expect(tokenCostUsd('vlm:openai/gpt-5.4-mini', usage)).toBe(expected);
+    expect(tokenCostUsd('vlm:openai/gpt-5.4', usage)).toBe((1842 * 2.5 + 96 * 15) / 1_000_000);
+
+    // Every route to "not known" ends at `null`, never at `0` - ADR-11. A model nobody priced, a
+    // call that reported no tokens, and an engine that is not token priced are all unknown here.
+    expect(tokenCostUsd('vlm:openai/not-yet', usage)).toBeNull();
+    expect(tokenCostUsd('vlm:openai/gpt-5.4-mini', null)).toBeNull();
+    expect(tokenCostUsd('gcv:builtin/stable', usage)).toBeNull();
+
+    // A zero-token call is a real zero. It is reachable only from a response that reported one, and
+    // that is a fact about the call rather than a missing price.
+    expect(tokenCostUsd('vlm:openai/gpt-5.4-mini', { inputTokens: 0, outputTokens: 0 })).toBe(0);
+  });
+
+  it('prices every VLM model it names, with provenance', () => {
+    for (const [engine, entry] of Object.entries(pricing)) {
+      if (!engine.startsWith('vlm:')) {
+        continue;
+      }
+
+      // Token priced, both halves filled, and both traceable to a page and a date. An entry with
+      // one half priced would silently halve the cost column.
+      expect(entry.unit).toBe('per-1M-tokens');
+      expect(typeof entry.inputUsd).toBe('number');
+      expect(typeof entry.outputUsd).toBe('number');
+      expect(entry.source).not.toBeNull();
+      expect(entry.retrieved).toBe(PRICING_VERSION);
+    }
   });
 
   it('accepts only declared parser and timing semantics', () => {

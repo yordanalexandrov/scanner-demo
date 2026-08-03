@@ -13,6 +13,7 @@ import {
   imageListQuerySchema,
   ocrResponseSchema,
   parseExpiryDate,
+  vlmOcrResponseSchema,
 } from '@scanner-demo/shared';
 import type {
   Attempt,
@@ -21,6 +22,7 @@ import type {
   BarcodeScanCreate,
   ImageUploadMeta,
   OcrResponse,
+  VlmOcrResponse,
 } from '@scanner-demo/shared';
 import { buildServer } from './app.js';
 import { openDatabase } from './db/client.js';
@@ -437,14 +439,19 @@ describe('self-hosted OCR', () => {
   }
 
   /** A second instance over the same database, so uploads made through `app` are visible to it. */
-  async function withEngine(engine: OcrEngine, gcvEngine?: OcrEngine): Promise<FastifyInstance> {
+  async function withEngine(
+    engine: OcrEngine,
+    gcvEngine?: OcrEngine,
+    vlmEngine?: OcrEngine,
+  ): Promise<FastifyInstance> {
     const instance = await buildServer({
       env,
       db: handle.db,
       localOcrEngine: engine,
-      // Never the real one: it would need a credential this repository does not hold and would
-      // bill a unit if it had it.
+      // Never the real ones: they would need credentials this repository does not hold, and would
+      // bill a unit or a token if they had them.
       gcvEngine: gcvEngine ?? engine,
+      vlmEngine: vlmEngine ?? engine,
     });
     ocrApps.push(instance);
     return instance;
@@ -698,6 +705,150 @@ describe('self-hosted OCR', () => {
 
       expect(response.statusCode).toBe(504);
       expect((response.json() as { error: string }).error).toBe('engine_timeout');
+    });
+  });
+
+  /**
+   * Phase 09 adds an endpoint, not a handler - like phase 08 before it. What is genuinely new is
+   * that this one's body is **wider than an `OcrResponse`**, and the serialiser drops whatever the
+   * route's schema does not name. These assert that the three extra fields survive the trip, that
+   * they exist on this endpoint only, and that everything else about the route is still the shared
+   * behaviour tested above rather than a second implementation of it.
+   */
+  describe('the VLM endpoint', () => {
+    const VLM_URL = '/api/v1/ocr/vlm';
+
+    function vlmResponse(overrides: Partial<VlmOcrResponse> = {}): VlmOcrResponse {
+      return {
+        ...ocrResponse({
+          engine: 'vlm:openai/gpt-5.4-mini',
+          rawText: 'BEST BEFORE\n31.12.2027',
+          blocks: [
+            { text: 'BEST BEFORE', bbox: null, confidence: null },
+            { text: '31.12.2027', bbox: null, confidence: null },
+          ],
+          engineMs: 3120,
+          usage: { inputTokens: 1842, outputTokens: 96 },
+          costEstimateUsd: (1842 * 0.75 + 96 * 4.5) / 1_000_000,
+        }),
+        parsedDate: '2027-12-31',
+        modelReasoning: 'BEST BEFORE sits directly above 31.12.2027.',
+        promptVersion: 'prompt-v1',
+        ...overrides,
+      };
+    }
+
+    it('returns the model answer and the prompt version, not just an OcrResponse', async () => {
+      const { imageId } = await upload(await testImage(1200, 1600));
+      const local = stubEngine(() => Promise.resolve(ocrResponse()));
+      const vlm = stubEngine(() => Promise.resolve(vlmResponse()));
+      const instance = await withEngine(local.engine, local.engine, vlm.engine);
+
+      const response = await post(instance, { imageId }, TOKEN, VLM_URL);
+      const body = response.json();
+
+      expect(response.statusCode).toBe(200);
+      expect(vlm.calls).toHaveLength(1);
+      expect(local.calls).toEqual([]);
+
+      // The whole reason this endpoint declares its own response schema. Under the shared
+      // `ocrResponseSchema` all three of these are stripped on the way out, the endpoint still
+      // answers 200, and the attempt row becomes one nobody can attribute to a prompt - ADR-24.
+      expect(vlmOcrResponseSchema.safeParse(body).success).toBe(true);
+      expect(body).toMatchObject({
+        parsedDate: '2027-12-31',
+        promptVersion: 'prompt-v1',
+        engine: 'vlm:openai/gpt-5.4-mini',
+      });
+      // The tokens the cost was derived from, stored rather than summarised away - criterion 5.
+      expect((body as VlmOcrResponse).usage).toEqual({ inputTokens: 1842, outputTokens: 96 });
+      // Filled in by the handler, which is the only thing that can measure its own wall time.
+      expect((body as VlmOcrResponse).serverTotalMs).toBeGreaterThanOrEqual(0);
+    });
+
+    it('keeps the extra fields off the other endpoints', async () => {
+      const { imageId } = await upload(await testImage(1200, 1600));
+      // The same engine behind every route, answering with the VLM's wider body. Only the route
+      // that declared the wider schema may let it through - otherwise a `parsedDate` could appear
+      // on a method that has no model, and the comparison would silently gain a fifth column.
+      const wide = stubEngine(() => Promise.resolve(vlmResponse()));
+      const instance = await withEngine(wide.engine, wide.engine, wide.engine);
+
+      expect(
+        await post(instance, { imageId }, TOKEN, '/api/v1/ocr/local').then((r) => r.json()),
+      ).not.toHaveProperty('parsedDate');
+      expect(
+        await post(instance, { imageId }, TOKEN, '/api/v1/ocr/gcv').then((r) => r.json()),
+      ).not.toHaveProperty('promptVersion');
+      expect(
+        await post(instance, { imageId }, TOKEN, VLM_URL).then((r) => r.json()),
+      ).toHaveProperty('parsedDate');
+    });
+
+    it('inherits the guards and the failure mapping rather than reimplementing them', async () => {
+      const { imageId } = await upload(await testImage(1200, 1600));
+      const vlm = stubEngine(() => Promise.resolve(vlmResponse()));
+      const instance = await withEngine(vlm.engine, vlm.engine, vlm.engine);
+
+      expect(
+        (await post(instance, { imageId: '../../etc/passwd' }, TOKEN, VLM_URL)).statusCode,
+      ).toBe(400);
+      expect((await post(instance, { imageId: randomUUID() }, null, VLM_URL)).statusCode).toBe(401);
+      // Neither request may reach an engine that spends tokens.
+      expect(vlm.calls).toEqual([]);
+
+      // The path is the server's own, from the stored row, exactly as on the other two.
+      await post(instance, { imageId }, TOKEN, VLM_URL);
+      expect(vlm.calls[0]?.path).toBe(path.join(env.imageDir, `${imageId}.jpg`));
+    });
+
+    it('records a bad answer as a 502 and a slow one as a 504, separately', async () => {
+      const { imageId } = await upload(await testImage(1200, 1600));
+
+      const malformed = stubEngine(() =>
+        Promise.reject(
+          new OcrEngineError(
+            "The model's answer did not conform - answered: I think it expires around December 2027.",
+          ),
+        ),
+      );
+      const bad = await withEngine(malformed.engine, malformed.engine, malformed.engine);
+      const badResponse = await post(bad, { imageId }, TOKEN, VLM_URL);
+
+      expect(badResponse.statusCode).toBe(502);
+      // The raw answer travels with the failure, so the attempt row the phone writes carries what
+      // the model actually said rather than only that it was wrong - criterion 7.
+      expect((badResponse.json() as { message: string }).message).toContain(
+        'I think it expires around December 2027.',
+      );
+
+      const slow = stubEngine(() =>
+        Promise.reject(
+          new OcrEngineError('OpenAI did not answer within 40000 ms', { timedOut: true }),
+        ),
+      );
+      const late = await withEngine(slow.engine, slow.engine, slow.engine);
+      const lateResponse = await post(late, { imageId }, TOKEN, VLM_URL);
+
+      expect(lateResponse.statusCode).toBe(504);
+      expect((lateResponse.json() as { error: string }).error).toBe('engine_timeout');
+    });
+
+    it('starts and serves the other methods with no VLM configuration at all', async () => {
+      // No `vlmEngine` injected, so `buildServer` constructs the real one from an environment that
+      // has no `OPENAI_API_KEY`. Construction must call nothing and check nothing: the three
+      // methods that do not need OpenAI are unaffected, and the VLM endpoint reports the missing
+      // credential as a recorded failure rather than as an outage - the phase 08 rule, again.
+      const { imageId } = await upload(await testImage(1200, 1600));
+      const local = stubEngine(() => Promise.resolve(ocrResponse()));
+      const instance = await buildServer({ env, db: handle.db, localOcrEngine: local.engine });
+      ocrApps.push(instance);
+
+      expect((await post(instance, { imageId }, TOKEN, '/api/v1/ocr/local')).statusCode).toBe(200);
+
+      const response = await post(instance, { imageId }, TOKEN, VLM_URL);
+      expect(response.statusCode).toBe(502);
+      expect((response.json() as { message: string }).message).toContain('OPENAI_API_KEY');
     });
   });
 });

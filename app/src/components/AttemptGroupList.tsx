@@ -58,6 +58,17 @@ function Run({ attempt }: { attempt: Attempt }) {
         </Text>
       )}
 
+      {attempt.vlm !== null && (
+        // The model's own answer, per run, beside the parser's above. Five runs of one image are
+        // five rows here, and the spread this exposes is a spread in *both* columns: a VLM can
+        // return a different date on the same pixels, and a summary that showed only the parser's
+        // reading would hide the half of the non-determinism that comes from the model - phase 09
+        // criterion 6.
+        <Text style={styles.caption}>
+          model said {attempt.vlm.parsedDate ?? 'no date'} · prompt {attempt.promptVersion ?? 'n/a'}
+        </Text>
+      )}
+
       <Text style={styles.caption}>
         engine {formatMs(attempt.timing.engineMs)} · parse {formatMs(attempt.timing.parseMs)} ·
         download {formatMs(attempt.timing.downloadMs)}
