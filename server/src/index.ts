@@ -55,6 +55,8 @@ async function main(): Promise<void> {
     'scanner-demo server ready',
   );
 
+  // **Only the sidecar is warmed.** Its first call pays a model load worth two seconds; Google's
+  // does not, and a dummy annotation to warm nothing would be a billed unit of nothing - ADR-11.
   if (env.OCR_WARMUP) {
     // Deliberately not awaited. The server is already listening and every route except the OCR one
     // works without the sidecar; blocking the boot on a container that takes five seconds to load

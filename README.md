@@ -20,15 +20,18 @@ comparability wins.
 
 ## Status
 
-**Phases 01 to 07 of 10 are complete; phase 08 is next.** Every
+**Phases 01 to 08 of 10 are complete; phase 09 is next.** Phase 08 ran against the real Cloud Vision
+API from the deployment box on 2026-08-03, and from an SM-S928B against it the same day. Every
 record the harness stores is defined once in `packages/shared`. The server is deployed at
 `scanner.yo-po.eu`, stores, serves and thumbnails images, and records barcode decode latencies. The
 Android app builds as an Expo development build, navigates its screens, scans EAN-13 with the decode
 latency measured on the phone's monotonic clock, and photographs an expiry date, stores it in two
 variants, reads both with on-device ML Kit and extracts the date with the one shared parser. The image
 library browses everything the server holds and re-runs any method over any stored image, which is what
-makes the two remaining engines cheap to add: they are measured against packaging already collected.
-**Two of the four methods are now wired**: on-device ML Kit and the self-hosted RapidOCR sidecar.
+makes the remaining engine cheap to add: it is measured against packaging already collected.
+**Three of the four methods are now wired**: on-device ML Kit, the self-hosted RapidOCR sidecar and
+Google Cloud Vision, all three returning the same `OcrResponse` and parsed by the same code, and all
+three carrying measured figures below.
 See [`docs/phases/README.md`](docs/phases/README.md) for the build order and where the work stands.
 
 ## The self-hosted engine
@@ -126,6 +129,101 @@ and have the container OOM-killed mid-benchmark. RapidOCR clamps the long side t
 so the *inference* is bounded; the spike is the full-size decode ahead of it. Re-running the
 `original` variant through this engine is safe for the images collected so far and is not safe by
 construction.
+
+## Google Cloud Vision
+
+`DOCUMENT_TEXT_DETECTION`, called from the server and only from the server. `POST /api/v1/ocr/gcv`
+takes an image ID; the server builds the path, reads the bytes and sends them. **The app holds no
+Google credential**, which is the whole reason the engine lives on that side — this repository is
+public and a key compiled into an APK comes back out with `strings`.
+
+**The model is pinned.** Vision accepts `builtin/stable`, `builtin/latest` and, for text detection,
+`builtin/weekly`. This harness pins `builtin/stable` and records it in the engine string as
+`gcv:builtin/stable`, for the same reason the VLM path records its model: a stored record that says
+only "GCV" stops being interpretable the moment Google moves its default on. The pin lives in code
+rather than in an environment variable, because it is also half of the price-table key — changing it
+has to be a change that brings the matching price with it ([ADR-11](docs/decisions.md)).
+
+**Latency**, measured from the deployment box on 2026-08-03, twenty consecutive calls on image
+`94530004` — the same image and the same method phase 07 used, so the two are comparable:
+
+| Figure | Cloud Vision | Self-hosted sidecar |
+|---|---|---|
+| Cold, first call of a process | **1.870 s** | 3.516 s |
+| Warm median | **266.5 ms** | 1.879 s |
+| Spread, IQR ÷ median | **12.9 % (n=20)** | 9.4 % (n=20) |
+
+Across 29 *different* Library images the median was 270.9 ms (p25 236.7, p75 301.7, min 85.1 on an
+image with no text at all, max 411.9). `serverTotalMs` ran 7.4 ms above `engineMs` at the median —
+that is the handler's own work, not a process boundary, for the reason stated below.
+
+**Cloud Vision has a cold start too, and nothing warms it.** The first call of a server process pays
+an OAuth token fetch and a TLS handshake — 1.870 s against a 266.5 ms warm median, measured
+immediately after a restart, with the second and third calls at 338 ms and 288 ms. It lands inside
+`engineMs`, because `engineMs` is the whole call. Unlike the sidecar, which the server warms at boot
+with a dummy inference, **the first Vision measurement after every deploy is roughly seven times the
+truth** and has to be discarded or attributed. A warm-up that only fetched the token would cost
+nothing and is not implemented.
+
+**Cost.** $1.50 per 1000 images, so `costEstimateUsd` is **$0.0015** per attempt, read from the
+shared price table at `pricingVersion: 2026-08-03` from
+[Google's pricing page](https://cloud.google.com/vision/pricing) on that date.
+
+> **The displayed cost will not match the billing console at benchmark volumes, and that is
+> deliberate.** The first 1000 units a month are free; the estimate ignores free tiers because it
+> answers "what would this cost at scale", which is the decision this benchmark informs
+> ([ADR-11](docs/decisions.md)). At 24 images a run the console reads $0.00 and this column does not.
+
+**What `engineMs` means on this path.** The SDK exposes no way to separate Google's inference from
+the round trip to it, so `engineMs` is the whole call and every response says so in
+`engineMsScope: "inference+network"` — the same scope the sidecar reports, for a different reason.
+**Network latency from the Hetzner box to Google's endpoint is inside that figure and cannot be
+taken out of it.** Any chart placing this bar next to the sidecar's is comparing a transatlantic
+round trip against a container on the same host unless it says so; against ML Kit's `"inference"`,
+which excludes transport entirely, it is not comparable at all ([ADR-10](docs/decisions.md)).
+
+A retry counts as one call. The SDK retries `UNAVAILABLE` and `DEADLINE_EXCEEDED` internally, and
+`GCV_TIMEOUT_MS` is passed as the total deadline across those attempts — so a retried call takes
+longer and is recorded as a single `engineMs`, backoff included. Failures are recorded rather than
+hidden: a missing or rejected credential produces an attempt row with `error` set, never an empty
+success, and a call that outlives the deadline is recorded as a timeout rather than as a slow read.
+
+**The key file is checked before the SDK is reached, and it is the only credential source.**
+`@google-cloud/vision` 5.3.7 answers a missing key file, or an absent Application Default
+Credential, by rejecting the call *and* leaving a floating promise rejection behind — which Node 22
+turns into an uncaught exception, so the server would answer the request and then exit. The engine
+therefore requires `GOOGLE_APPLICATION_CREDENTIALS` and reads the file itself first, which is what
+makes "a bad credential is a recorded attempt, not an outage" true rather than hoped for. The cost
+is that credentials from a metadata server or a `gcloud` login are not supported; this deployment
+mounts a key file and has neither.
+
+**Confidence is read at block level and only at block level.** Vision reports one at block,
+paragraph, word and symbol granularity; mixing them between images would produce a column that
+cannot be compared with itself. Its blocks are the granularity ML Kit's wrapper reports, so the
+parser sees the same shape from both.
+
+**Accuracy: 21 of 29 Library images parse to a date**, scored with the shared parser and each
+image's own `capturedAt` as `referenceDate`. The interesting part is not the count but the route:
+**17 of the 21 arrive by `anchor-proximity`**, against 3 by `sole-candidate` and 1 by
+`latest-of-pair`. This is the first engine in the harness that reads the Bulgarian anchor —
+`Годен до: 07/2027` came back verbatim at confidence 0.984 — so the parser reaches the date by
+recognising what the package says rather than by finding the only date-shaped string on it. On the
+same packaging ML Kit reads `fogeH A0:` and the sidecar's Chinese/English models do no better.
+
+On the **10 images all three methods have run**, however, the counts are identical — **6 of 10
+each** — and reading them as a tie would be a mistake in the other direction:
+
+- Cloud Vision and the sidecar agree on 4, each reads 2 the other cannot, and they never disagree on
+  a date they both read.
+- One of ML Kit's six is *wrong*: on `deb27c57` it reports `2026-09-30` where both server engines
+  report `2025-06-30` — the upside-down `30.06.25` recorded under Known limitations below. A count
+  of extractions is not a count of correct extractions.
+
+Boxes were checked by eye against the source image on the same date: 16 blocks over a 1200×1600
+capture, each landing on its text, including the rotated and inverted labels around the packaging
+graphic, whose axis-aligned boxes are correspondingly larger than the glyphs they contain. Vision's
+reported page size matched the stored file exactly, so the EXIF-rotation case the adapter guards
+against did not arise on this image.
 
 ## Layout
 

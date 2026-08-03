@@ -26,9 +26,18 @@ type ResultRoute = RouteProp<RootStackParamList, 'Result'>;
 /**
  * A cost of zero is a real, known zero here - the price table says on-device runs have no per-call
  * cost. `null` means the price is not yet known and must never render as free - ADR-11.
+ *
+ * **Two decimals are not enough**, and phase 08 is where that stopped being theoretical: one Cloud
+ * Vision image is $0.0015, which `toFixed(2)` renders as `$0.00` - indistinguishable from the
+ * on-device engine that really is free. A cost column whose only cloud entry reads zero is worse
+ * than no cost column, so a sub-cent figure gets the precision it needs to stay a figure.
  */
 function formatCost(usd: number | null): string {
-  return usd === null ? 'unknown' : `$${usd.toFixed(2)}`;
+  if (usd === null) {
+    return 'unknown';
+  }
+
+  return `$${usd.toFixed(usd !== 0 && Math.abs(usd) < 0.01 ? 5 : 2)}`;
 }
 
 function ParsedDate({ attempt }: { attempt: Attempt }) {

@@ -73,7 +73,7 @@ four once the remaining engines exist, so it blocks 07 rather than following it.
 | [06](06-library.md) | Image library | complete | Grid, filters, additive re-runs |
 | [06b](06b-parser-and-timing-fixes.md) | Parser and timing corrections | complete | Recorded-block fixtures, re-runs, method totals that reconcile |
 | [07](07-ocr-sidecar.md) | Self-hosted OCR sidecar | complete | **Two stops:** spike report, then build-out |
-| [08](08-gcv.md) | Google Cloud Vision engine | not started | GCV over existing library images |
+| [08](08-gcv.md) | Google Cloud Vision engine | complete | GCV over existing library images |
 | [09](09-vlm.md) | VLM engine | not started | Model answer vs parser answer, provider swap |
 | [10](10-history.md) | History and JSON export | not started | The POC's actual deliverable |
 
@@ -119,6 +119,32 @@ pixels on the handset, so the segment did not happen and is not recorded as `0`.
 Stage B also turned up a limit the spike did not reach, now in the README: peak resident memory is
 615 MiB on the 1200×1600 upload variant but **929 MiB on a 6000×4500 original**, against a 1 GiB
 `mem_limit` that `MAX_UPLOAD_BYTES` permits images to exceed. The box holds one such original.
+
+Phase 08 ran against the real API from the box on **2026-08-03**, over the Library as it stood at 29
+`upload` images. Warm median **266.5 ms** with **IQR ÷ median 12.9 %** on twenty consecutive calls on
+`94530004` — the sidecar's own image, where its figure is 1.879 s — and `serverTotalMs` 7.4 ms above
+`engineMs` at the median. **21 of 29 images parse a date, 17 of them by `anchor-proximity`**: this is
+the first engine in the harness that reads `Годен до`, at confidence 0.984, so the parser recognises
+what the package says instead of finding the only date-shaped string on it. On the ten images all
+three methods have run the counts tie at 6 apiece, and the tie is misleading in both directions —
+Vision and the sidecar each read two the other cannot and never contradict each other, while one of
+ML Kit's six is the known upside-down misread.
+
+Two failures were exercised deliberately and both behaved: a missing key file and billing disabled
+on the Google project each produced a 502 carrying the actual reason, with the server still serving,
+and `GCV_TIMEOUT_MS=1` produced a 504. Sixteen boxes drawn over `94530004` land on their text.
+
+**The handset half closed the same day**, on an SM-S928B (Android 16) against the deployed box: two
+re-runs of `gcv` on `94530004` produced **two rows under one group** with a median across them,
+`engineMs` 298.3 inside `serverTotalMs` 311 inside the phone's `requestMs` 536 inside `totalMs`
+538.1, `captureMs`/`downscaleMs`/`downloadMs` all `null` rather than `0`, and `costEstimateUsd`
+0.0015 with `pricingVersion` 2026-08-03 on both. Both reached `2027-07-31` **by `anchor-proximity`**
+where ML Kit reaches the same date on the same image by `sole-candidate` — the same answer by a
+different route, because only one of the two can read the words next to the date.
+
+The one defect the run found is recorded rather than fixed — Vision has a ~1.6 s cold start on the
+first call of a process, inside `engineMs`, that nothing warms; see
+[08-gcv.md](08-gcv.md#the-acceptance-run-2026-08-03).
 
 ## Global constraints
 

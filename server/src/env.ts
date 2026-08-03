@@ -51,6 +51,24 @@ const envSchema = z.object({
     .enum(['true', 'false'])
     .default('true')
     .transform((value) => value === 'true'),
+
+  // The service-account key file for Google Cloud Vision - phase 08. The engine reads it from here
+  // and passes it to the SDK explicitly rather than letting the SDK search: a credential the SDK
+  // cannot find leaves a floating rejection that would take the process down, so the check happens
+  // where it can be answered - see server/src/engines/gcv.ts.
+  //
+  // **Optional on purpose, and it must stay optional.** A missing key is a recorded attempt with
+  // `error` set, not a server that refuses to start: every other route, and the two other engines,
+  // work perfectly well without Google - phase 08 criterion 6.
+  GOOGLE_APPLICATION_CREDENTIALS: z.string().min(1).optional(),
+
+  // Explicit limit on the Vision call. gax makes it the total deadline across the transient retries
+  // it performs, so the endpoint cannot outlive it.
+  //
+  // Keep it BELOW the app's own 45 s round-trip timeout, for the reason OCR_SIDECAR_TIMEOUT_MS is:
+  // the server timing out first is what makes a slow engine arrive on the phone as a measurement
+  // rather than as noise.
+  GCV_TIMEOUT_MS: z.coerce.number().int().min(1).default(30_000),
 });
 
 export type Env = z.infer<typeof envSchema> & {

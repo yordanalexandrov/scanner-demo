@@ -31,7 +31,7 @@ import {
   type CaptureSource,
   type StoredCapture,
 } from '../lib/capture';
-import { runLocalOcr, runMlKit } from '../lib/runMethod';
+import { runMethod } from '../lib/runMethod';
 import type { RootStackParamList } from '../navigation/RootNavigator';
 import { colors, radius, spacing } from '../theme';
 
@@ -312,7 +312,7 @@ export function CaptureScreen() {
           startedAt,
         };
 
-        const outcome = method === 'mlkit' ? await runMlKit(input) : await runLocalOcr(input);
+        const outcome = await runMethod(method, input);
 
         results.push({ variant, recordError: outcome.recordError, error: outcome.attempt.error });
       }

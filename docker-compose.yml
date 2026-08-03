@@ -27,6 +27,9 @@ services:
       DATABASE_PATH: /data/db/scanner.sqlite
       # Resolved on the internal network below, which has no route out and no published port.
       OCR_SIDECAR_URL: http://ocr:9005
+      # The path *inside* the container, so server/.env can hold the host path it was written with.
+      # The file itself arrives through the read-only mount below and is never in an image layer.
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/gcv-service-account.json
 
     networks:
       # Both, and it has to be spelled out: naming any network at all opts a service out of the
@@ -50,6 +53,14 @@ services:
       - scanner-images:/data/images
       - scanner-thumbs:/data/thumbs
       - scanner-db:/data/db
+      # The Google service-account key, read-only, mounted rather than built in: a credential inside
+      # an image layer survives every `docker save`, every registry push and every `docker history`.
+      # The directory is gitignored and the file is created on the box - deploy/README.md.
+      #
+      # Bind mounts are created by Docker when they are missing, so a deployment without the key
+      # gets an empty directory here and the Vision endpoint answers 502 with a message naming the
+      # file. That is the intended failure: the sidecar and the on-device path go on working.
+      - ./deploy/secrets:/run/secrets:ro
 
     # Both limits, not just the CPU one. The box has no swap and the largest resident process on it
     # is production Postgres; an unbounded container that grows takes down the thing this benchmark

@@ -17,17 +17,16 @@ import type {
   Timing,
 } from '@scanner-demo/shared';
 import { createAttempt } from '../api/attempts';
-import { recogniseWithSelfHostedOcr } from '../api/ocr';
+import { recogniseWithGcv, recogniseWithSelfHostedOcr } from '../api/ocr';
 import { describeDevice } from '../device';
 import { recogniseWithMlKit } from './mlkit';
 
 /**
  * One run of one method: recognise, parse, record.
  *
- * The parser runs here, on the phone, for **every** method - including the three server ones that
- * arrive in phases 07 to 09. One orchestration path instead of two, and `parseMs` becomes four
- * numbers measured on the same CPU by the same code rather than a phone core compared against a
- * VPS core - ADR-15.
+ * The parser runs here, on the phone, for **every** method - including the server ones from phases
+ * 07 to 09. One orchestration path instead of two, and `parseMs` becomes four numbers measured on
+ * the same CPU by the same code rather than a phone core compared against a VPS core - ADR-15.
  */
 
 const DEVICE = describeDevice();
@@ -195,18 +194,26 @@ export async function runMlKit(input: RunMethodInput): Promise<RunMethodResult> 
 }
 
 /**
- * Runs the self-hosted sidecar over an image the server already holds, and records the outcome.
+ * Runs a server-side engine over an image the server already holds, and records the outcome.
  *
  * **No pixels leave the phone here.** The bytes were uploaded once when the capture was stored, so
- * this posts an image ID and waits. That is why `uploadMs` is not re-measured on this path and why
- * `downloadMs` stays `null` even on a Library re-run: unlike ML Kit, this engine needs nothing on
+ * this posts an image ID and waits. That is why `uploadMs` is not re-measured on these paths and why
+ * `downloadMs` stays `null` even on a Library re-run: unlike ML Kit, these engines need nothing on
  * the handset.
  *
  * `requestMs` is the phone's own round trip and `engineMs` / `serverTotalMs` are the server's, on a
  * clock this process shares nothing with. The gap between them is network time, and it is reported
  * as a labelled estimate from the two stored fields rather than computed into one - ADR-10.
+ *
+ * One function for all of them, because `requestMs` has to start at the same point and a failure has
+ * to become a row on every one of them. The engine is the only thing that differs.
  */
-export async function runLocalOcr(input: RunMethodInput): Promise<RunMethodResult> {
+async function runOnServer(
+  input: RunMethodInput,
+  method: Method,
+  recognise: (imageId: string) => Promise<OcrResponse>,
+  failureMessage: string,
+): Promise<RunMethodResult> {
   let recognised: Recognised;
 
   // Started outside the try, so the wait is measured on both paths. How long the phone waited
@@ -215,15 +222,65 @@ export async function runLocalOcr(input: RunMethodInput): Promise<RunMethodResul
   const requestedAt = now();
 
   try {
-    const ocr = await recogniseWithSelfHostedOcr(input.sourceImageId);
+    const ocr = await recognise(input.sourceImageId);
     recognised = { ocr, requestMs: elapsed(requestedAt), error: null };
   } catch (failure: unknown) {
     recognised = {
       ocr: null,
       requestMs: elapsed(requestedAt),
-      error: toMessage(failure, 'The self-hosted engine failed to read the image'),
+      error: toMessage(failure, failureMessage),
     };
   }
 
-  return record(input, 'onnx-paddleocr', recognised);
+  return record(input, method, recognised);
+}
+
+/** The self-hosted sidecar, on the server's internal network - phase 07. */
+export function runLocalOcr(input: RunMethodInput): Promise<RunMethodResult> {
+  return runOnServer(
+    input,
+    'onnx-paddleocr',
+    recogniseWithSelfHostedOcr,
+    'The self-hosted engine failed to read the image',
+  );
+}
+
+/**
+ * Google Cloud Vision, called by the server on this app's behalf - phase 08.
+ *
+ * The attempt's `method` is `gcv`; the model pin lives in `ocr.engine` as `gcv:builtin/stable`,
+ * which is also the price-table key. Two fields rather than one because the method is what a filter
+ * groups by and the engine string is what a price and a provider version attach to - ADR-11.
+ */
+export function runGcv(input: RunMethodInput): Promise<RunMethodResult> {
+  return runOnServer(input, 'gcv', recogniseWithGcv, 'Cloud Vision failed to read the image');
+}
+
+/**
+ * The methods a run can dispatch to, by name.
+ *
+ * A table rather than a chain of ternaries at each call site: the capture screen and the Library
+ * both dispatch, and a method added to one and forgotten in the other is a silent gap in the
+ * comparison. `vlm` arrives with phase 09 and is absent here until it does.
+ */
+const RUNNERS: Partial<Record<Method, (input: RunMethodInput) => Promise<RunMethodResult>>> = {
+  mlkit: runMlKit,
+  'onnx-paddleocr': runLocalOcr,
+  gcv: runGcv,
+};
+
+/**
+ * Rejects rather than recording nothing for a method whose phase has not landed.
+ *
+ * `async` so the failure is a rejection like every other failure on this path, rather than a
+ * synchronous throw that a caller writing `.catch()` would miss.
+ */
+export async function runMethod(method: Method, input: RunMethodInput): Promise<RunMethodResult> {
+  const runner = RUNNERS[method];
+
+  if (runner === undefined) {
+    throw new Error(`${method} arrives with its own phase`);
+  }
+
+  return runner(input);
 }
