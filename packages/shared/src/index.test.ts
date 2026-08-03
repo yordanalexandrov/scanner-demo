@@ -55,7 +55,11 @@ describe('shared contracts', () => {
   });
 
   it('accepts only declared parser and timing semantics', () => {
-    expect(parserVersionSchema.options).toEqual([LEGACY_PARSER_VERSION, PARSER_VERSION]);
+    // Every past version stays accepted - rows recorded under older rules keep saying so, and a
+    // schema that stopped parsing them would make the history unreadable rather than obsolete.
+    expect(parserVersionSchema.options).toEqual(['parser-v1', 'parser-v2', 'parser-v3']);
+    expect(parserVersionSchema.options).toContain(LEGACY_PARSER_VERSION);
+    expect(parserVersionSchema.options).toContain(PARSER_VERSION);
     expect(timingVersionSchema.options).toEqual([LEGACY_TIMING_VERSION, TIMING_VERSION]);
     expect(parserVersionSchema.safeParse('parser-typo').success).toBe(false);
     expect(timingVersionSchema.safeParse('timing-typo').success).toBe(false);
