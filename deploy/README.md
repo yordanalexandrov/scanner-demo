@@ -41,9 +41,19 @@ less obvious error than here. Files are world-readable for the same reason.
   The same value goes into `app/.env` as `EXPO_PUBLIC_API_TOKEN`. It is bundled into the APK and is
   deliberately not treated as a secret — it is a coarse, rotatable gate on a personal server.
 
-- **The Google Cloud Vision key**, for the phase 08 engine. A service-account JSON with the
-  `roles/serviceusage.serviceUsageConsumer` and Vision API access, downloaded from the Google Cloud
-  console and placed on the box **only**:
+- **The Google Cloud Vision key**, for the phase 08 engine. A service-account JSON from a project
+  that has **billing enabled** and the **Cloud Vision API enabled** — Vision needs no project role
+  beyond that for a key used in its own project:
+
+  ```bash
+  gcloud config set project <PROJECT_ID>
+  gcloud services enable vision.googleapis.com
+  gcloud iam service-accounts create scanner-demo-vision --display-name='scanner-demo Vision'
+  gcloud iam service-accounts keys create gcv-service-account.json \
+    --iam-account="scanner-demo-vision@<PROJECT_ID>.iam.gserviceaccount.com"
+  ```
+
+  The file is placed on the box **only**:
 
   ```bash
   mkdir -p deploy/secrets
