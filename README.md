@@ -20,15 +20,19 @@ comparability wins.
 
 ## Status
 
-**Phases 01 to 07 of 10 are complete; phase 08 is next.** Every
+**Phases 01 to 07 of 10 are complete. Phase 08 is built and awaiting its acceptance run against the
+real Cloud Vision API**, which needs a service-account key the repository deliberately does not
+hold. Every
 record the harness stores is defined once in `packages/shared`. The server is deployed at
 `scanner.yo-po.eu`, stores, serves and thumbnails images, and records barcode decode latencies. The
 Android app builds as an Expo development build, navigates its screens, scans EAN-13 with the decode
 latency measured on the phone's monotonic clock, and photographs an expiry date, stores it in two
 variants, reads both with on-device ML Kit and extracts the date with the one shared parser. The image
 library browses everything the server holds and re-runs any method over any stored image, which is what
-makes the two remaining engines cheap to add: they are measured against packaging already collected.
-**Two of the four methods are now wired**: on-device ML Kit and the self-hosted RapidOCR sidecar.
+makes the remaining engine cheap to add: it is measured against packaging already collected.
+**Three of the four methods are now wired**: on-device ML Kit, the self-hosted RapidOCR sidecar and
+Google Cloud Vision, all three returning the same `OcrResponse` and parsed by the same code. Only the
+first two carry measured figures below.
 See [`docs/phases/README.md`](docs/phases/README.md) for the build order and where the work stands.
 
 ## The self-hosted engine
@@ -126,6 +130,61 @@ and have the container OOM-killed mid-benchmark. RapidOCR clamps the long side t
 so the *inference* is bounded; the spike is the full-size decode ahead of it. Re-running the
 `original` variant through this engine is safe for the images collected so far and is not safe by
 construction.
+
+## Google Cloud Vision
+
+`DOCUMENT_TEXT_DETECTION`, called from the server and only from the server. `POST /api/v1/ocr/gcv`
+takes an image ID; the server builds the path, reads the bytes and sends them. **The app holds no
+Google credential**, which is the whole reason the engine lives on that side — this repository is
+public and a key compiled into an APK comes back out with `strings`.
+
+**The model is pinned.** Vision accepts `builtin/stable`, `builtin/latest` and, for text detection,
+`builtin/weekly`. This harness pins `builtin/stable` and records it in the engine string as
+`gcv:builtin/stable`, for the same reason the VLM path records its model: a stored record that says
+only "GCV" stops being interpretable the moment Google moves its default on. The pin lives in code
+rather than in an environment variable, because it is also half of the price-table key — changing it
+has to be a change that brings the matching price with it ([ADR-11](docs/decisions.md)).
+
+**Latency is not quoted here yet.** The engine is built and tested; its figures land when the phase
+08 acceptance run happens against the real API with a real key, and quoting anything before that
+would be inventing the number this repository exists to measure.
+
+**Cost.** $1.50 per 1000 images, so `costEstimateUsd` is **$0.0015** per attempt, read from the
+shared price table at `pricingVersion: 2026-08-03` from
+[Google's pricing page](https://cloud.google.com/vision/pricing) on that date.
+
+> **The displayed cost will not match the billing console at benchmark volumes, and that is
+> deliberate.** The first 1000 units a month are free; the estimate ignores free tiers because it
+> answers "what would this cost at scale", which is the decision this benchmark informs
+> ([ADR-11](docs/decisions.md)). At 24 images a run the console reads $0.00 and this column does not.
+
+**What `engineMs` means on this path.** The SDK exposes no way to separate Google's inference from
+the round trip to it, so `engineMs` is the whole call and every response says so in
+`engineMsScope: "inference+network"` — the same scope the sidecar reports, for a different reason.
+**Network latency from the Hetzner box to Google's endpoint is inside that figure and cannot be
+taken out of it.** Any chart placing this bar next to the sidecar's is comparing a transatlantic
+round trip against a container on the same host unless it says so; against ML Kit's `"inference"`,
+which excludes transport entirely, it is not comparable at all ([ADR-10](docs/decisions.md)).
+
+A retry counts as one call. The SDK retries `UNAVAILABLE` and `DEADLINE_EXCEEDED` internally, and
+`GCV_TIMEOUT_MS` is passed as the total deadline across those attempts — so a retried call takes
+longer and is recorded as a single `engineMs`, backoff included. Failures are recorded rather than
+hidden: a missing or rejected credential produces an attempt row with `error` set, never an empty
+success, and a call that outlives the deadline is recorded as a timeout rather than as a slow read.
+
+**The key file is checked before the SDK is reached, and it is the only credential source.**
+`@google-cloud/vision` 5.3.7 answers a missing key file, or an absent Application Default
+Credential, by rejecting the call *and* leaving a floating promise rejection behind — which Node 22
+turns into an uncaught exception, so the server would answer the request and then exit. The engine
+therefore requires `GOOGLE_APPLICATION_CREDENTIALS` and reads the file itself first, which is what
+makes "a bad credential is a recorded attempt, not an outage" true rather than hoped for. The cost
+is that credentials from a metadata server or a `gcloud` login are not supported; this deployment
+mounts a key file and has neither.
+
+**Confidence is read at block level and only at block level.** Vision reports one at block,
+paragraph, word and symbol granularity; mixing them between images would produce a column that
+cannot be compared with itself. Its blocks are the granularity ML Kit's wrapper reports, so the
+parser sees the same shape from both.
 
 ## Layout
 

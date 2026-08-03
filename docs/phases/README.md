@@ -73,7 +73,7 @@ four once the remaining engines exist, so it blocks 07 rather than following it.
 | [06](06-library.md) | Image library | complete | Grid, filters, additive re-runs |
 | [06b](06b-parser-and-timing-fixes.md) | Parser and timing corrections | complete | Recorded-block fixtures, re-runs, method totals that reconcile |
 | [07](07-ocr-sidecar.md) | Self-hosted OCR sidecar | complete | **Two stops:** spike report, then build-out |
-| [08](08-gcv.md) | Google Cloud Vision engine | not started | GCV over existing library images |
+| [08](08-gcv.md) | Google Cloud Vision engine | built, awaiting the acceptance run | GCV over existing library images |
 | [09](09-vlm.md) | VLM engine | not started | Model answer vs parser answer, provider swap |
 | [10](10-history.md) | History and JSON export | not started | The POC's actual deliverable |
 
@@ -119,6 +119,15 @@ pixels on the handset, so the segment did not happen and is not recorded as `0`.
 Stage B also turned up a limit the spike did not reach, now in the README: peak resident memory is
 615 MiB on the 1200×1600 upload variant but **929 MiB on a 6000×4500 original**, against a 1 GiB
 `mem_limit` that `MAX_UPLOAD_BYTES` permits images to exceed. The box holds one such original.
+
+Phase 08 is **built but not accepted**. Its scope is implemented and everything checkable without a
+Google credential is checked — the response shape, the geometry conversion, the block-level
+confidence, the `$0.0015` cost at `pricingVersion 2026-08-03`, the credential failure that becomes a
+502 and an attempt row, the timeout that becomes a 504, and criterion 8's grep finding no Google SDK
+or credential shape in `app/`. The criteria that need a service-account key and a run against the
+real API — boxes verified by eye, Cyrillic packaging, two rows from two runs — are listed with their
+state in [08-gcv.md](08-gcv.md#where-this-stands-2026-08-03). No latency figure is quoted anywhere
+until that run happens.
 
 ## Global constraints
 

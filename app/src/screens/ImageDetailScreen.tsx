@@ -20,7 +20,7 @@ import { METHODS, MethodButtons } from '../components/MethodButtons';
 import { RerunAllButton } from '../components/RerunAllButton';
 import { formatBytes, formatTimestamp } from '../format';
 import { anchorImage, sortVariants } from '../lib/captureGroup';
-import { rerunLocalOcr, rerunMethods, rerunMlKit } from '../lib/rerun';
+import { rerunMethod, rerunMethods } from '../lib/rerun';
 import type { RunMethodResult } from '../lib/runMethod';
 import type { RootStackParamList } from '../navigation/RootNavigator';
 import { colors, radius, spacing } from '../theme';
@@ -170,13 +170,7 @@ export function ImageDetailScreen() {
       setError(null);
 
       try {
-        if (method === 'mlkit') {
-          setOutcomes([describe(method, await rerunMlKit({ anchor, target }))]);
-        } else if (method === 'onnx-paddleocr') {
-          setOutcomes([describe(method, await rerunLocalOcr({ anchor, target }))]);
-        } else {
-          throw new Error(`${method} arrives with its own phase`);
-        }
+        setOutcomes([describe(method, await rerunMethod(method, { anchor, target }))]);
       } catch (failure: unknown) {
         setOutcomes([`${method}: ${failure instanceof Error ? failure.message : 'failed'}`]);
       } finally {

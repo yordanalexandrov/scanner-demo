@@ -437,8 +437,15 @@ describe('self-hosted OCR', () => {
   }
 
   /** A second instance over the same database, so uploads made through `app` are visible to it. */
-  async function withEngine(engine: OcrEngine): Promise<FastifyInstance> {
-    const instance = await buildServer({ env, db: handle.db, localOcrEngine: engine });
+  async function withEngine(engine: OcrEngine, gcvEngine?: OcrEngine): Promise<FastifyInstance> {
+    const instance = await buildServer({
+      env,
+      db: handle.db,
+      localOcrEngine: engine,
+      // Never the real one: it would need a credential this repository does not hold and would
+      // bill a unit if it had it.
+      gcvEngine: gcvEngine ?? engine,
+    });
     ocrApps.push(instance);
     return instance;
   }
@@ -447,10 +454,11 @@ describe('self-hosted OCR', () => {
     instance: FastifyInstance,
     body: object,
     token: string | null = TOKEN,
+    url = '/api/v1/ocr/local',
   ): Promise<LightMyRequestResponse> {
     return instance.inject({
       method: 'POST',
-      url: '/api/v1/ocr/local',
+      url,
       headers: token === null ? {} : { authorization: `Bearer ${token}` },
       payload: body,
     });
@@ -608,6 +616,89 @@ describe('self-hosted OCR', () => {
     await post(instance, { imageId });
 
     expect(stub.calls).toHaveLength(2);
+  });
+
+  /**
+   * Phase 08 adds an endpoint, not a handler. These assert exactly that: the Vision endpoint routes
+   * to its own engine, and inherits the guards and the failure mapping the sidecar one is tested
+   * for above rather than reimplementing them.
+   */
+  describe('the Google Cloud Vision endpoint', () => {
+    const GCV_URL = '/api/v1/ocr/gcv';
+
+    it('routes to the Vision engine and not to the sidecar', async () => {
+      const { imageId } = await upload(await testImage(1200, 1600));
+      const local = stubEngine(() => Promise.resolve(ocrResponse()));
+      const gcv = stubEngine(() =>
+        Promise.resolve(
+          ocrResponse({ engine: 'gcv:builtin/stable', costEstimateUsd: 0.0015, engineMs: 412 }),
+        ),
+      );
+      const instance = await withEngine(local.engine, gcv.engine);
+
+      const response = await post(instance, { imageId }, TOKEN, GCV_URL);
+
+      expect(response.statusCode).toBe(200);
+      expect(ocrResponseSchema.safeParse(response.json()).success).toBe(true);
+      expect(gcv.calls).toHaveLength(1);
+      expect(local.calls).toEqual([]);
+    });
+
+    it('builds the path itself here too, from the stored row', async () => {
+      const { imageId } = await upload(await testImage(1200, 1600));
+      const gcv = stubEngine(() => Promise.resolve(ocrResponse()));
+      const instance = await withEngine(
+        stubEngine(() => Promise.resolve(ocrResponse())).engine,
+        gcv.engine,
+      );
+
+      await post(instance, { imageId }, TOKEN, GCV_URL);
+
+      expect(gcv.calls[0]?.path).toBe(path.join(env.imageDir, `${imageId}.jpg`));
+    });
+
+    it('refuses a path where an ID belongs, and requires the bearer token', async () => {
+      const gcv = stubEngine(() => Promise.resolve(ocrResponse()));
+      const instance = await withEngine(gcv.engine, gcv.engine);
+
+      expect(
+        (await post(instance, { imageId: '../../etc/passwd' }, TOKEN, GCV_URL)).statusCode,
+      ).toBe(400);
+      expect((await post(instance, { imageId: randomUUID() }, null, GCV_URL)).statusCode).toBe(401);
+      // Neither request may reach an engine that bills per call.
+      expect(gcv.calls).toEqual([]);
+    });
+
+    it('reports a credential failure as a 502 the app can record - criterion 6', async () => {
+      const { imageId } = await upload(await testImage(1200, 1600));
+      const gcv = stubEngine(() =>
+        Promise.reject(new OcrEngineError('Cloud Vision rejected the credentials: no key file')),
+      );
+      const instance = await withEngine(gcv.engine, gcv.engine);
+
+      const response = await post(instance, { imageId }, TOKEN, GCV_URL);
+
+      // Never a crash and never an empty success: the phone gets a message and writes an attempt
+      // row with `error` set, which is a measurement about the method.
+      expect(response.statusCode).toBe(502);
+      expect((response.json() as { error: string }).error).toBe('engine_failed');
+      expect((response.json() as { message: string }).message).toContain('credentials');
+    });
+
+    it('answers 504 when Vision outlives its deadline - criterion 7', async () => {
+      const { imageId } = await upload(await testImage(1200, 1600));
+      const gcv = stubEngine(() =>
+        Promise.reject(
+          new OcrEngineError('Cloud Vision did not answer within 30000 ms', { timedOut: true }),
+        ),
+      );
+      const instance = await withEngine(gcv.engine, gcv.engine);
+
+      const response = await post(instance, { imageId }, TOKEN, GCV_URL);
+
+      expect(response.statusCode).toBe(504);
+      expect((response.json() as { error: string }).error).toBe('engine_timeout');
+    });
   });
 });
 

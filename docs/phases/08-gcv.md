@@ -1,6 +1,6 @@
 # Phase 08 — Google Cloud Vision engine
 
-**Status:** not started · **Depends on:** 06, 07 · **Source:** spec milestone 8
+**Status:** built, awaiting the acceptance run · **Depends on:** 06, 07 · **Source:** spec milestone 8
 
 ## Goal
 
@@ -99,3 +99,41 @@ Implements `OcrEngine` from `server/src/engines/types.ts` — no new abstraction
 Show: GCV run against several existing Library images including Bulgarian packaging, boxes verified
 visually, cost and pricing version recorded, a credential failure handled as a recorded error, and the
 side-by-side comparison with the on-device and self-hosted attempts on the same image.
+
+## Where this stands, 2026-08-03
+
+Everything in **Scope** is implemented and every criterion that can be checked without a Google
+credential is checked. **Criteria 1–7, 9 and 10 need a service-account key and a run against the real
+API**, which is the owner's to provide — the repository deliberately holds none, and inventing the
+numbers would defeat the point of the phase.
+
+| Criterion | State |
+|---|---|
+| 1 · `OcrResponse` validates, non-empty `blocks` | schema-validated against fixtures in `server/src/engines/gcv.test.ts`; **real image pending** |
+| 2 · boxes land on the right text | **pending** — needs the visual check against a real response |
+| 3 · `engineMsScope` is `"inference+network"` | asserted in the adapter tests |
+| 4 · `costEstimateUsd` non-zero, `pricingVersion` recorded | asserted: `$0.0015`, `2026-08-03` |
+| 5 · price entry carries source and retrieval date | in `packages/shared/src/pricing.ts` |
+| 6 · bad credentials become a recorded error | asserted at both layers: engine names it, route answers 502 |
+| 7 · forced timeout is a recorded failure | asserted: `DEADLINE_EXCEEDED` → `timedOut` → 504 |
+| 8 · no Google credential or SDK in the app | verified by the grep in the criterion; `@google-cloud/vision` is in `server/package.json` only |
+| 9 · run over Library images, Cyrillic included | **pending** |
+| 10 · two runs, two attempt rows | inherited from the additive rule the Library already enforces; **pending on this method** |
+
+Deliberate departures from the phase document, both recorded in the code that makes them:
+
+- **`@google-cloud/vision`'s `annotateImage` helper is bypassed for `batchAnnotateImages` with one
+  request** — which is precisely what the helper does internally. Its type signature accepts no call
+  options, and item 7's explicit timeout is not worth giving up for a tidier call. This is not the
+  batch API the **Out of scope** list excludes: one image, one synchronous call.
+- **The model pin is a constant, not an environment variable.** It is half of the engine string and
+  therefore of the price-table key, so changing it has to be a code change that brings the matching
+  price with it — otherwise a deployment can silently produce attempts whose cost is unknown.
+- **`GOOGLE_APPLICATION_CREDENTIALS` is the only credential source, and it is checked before the SDK
+  is touched.** Criterion 6 asks for "never a crash", and the SDK does not give that for free:
+  measured against `@google-cloud/vision` 5.3.7 on Node 22, a missing key file and an absent default
+  credential each reject the call **and leave a second, floating rejection**, which Node's default
+  turns into an uncaught exception — the server would answer the request and then die. A key file
+  whose *contents* are wrong rejects once, normally, and is left to the SDK. The cost is that
+  Application Default Credentials from a metadata server or a `gcloud` login are not supported;
+  this deployment mounts a key file and has neither.

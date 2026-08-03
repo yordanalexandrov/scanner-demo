@@ -41,6 +41,25 @@ less obvious error than here. Files are world-readable for the same reason.
   The same value goes into `app/.env` as `EXPO_PUBLIC_API_TOKEN`. It is bundled into the APK and is
   deliberately not treated as a secret — it is a coarse, rotatable gate on a personal server.
 
+- **The Google Cloud Vision key**, for the phase 08 engine. A service-account JSON with the
+  `roles/serviceusage.serviceUsageConsumer` and Vision API access, downloaded from the Google Cloud
+  console and placed on the box **only**:
+
+  ```bash
+  mkdir -p deploy/secrets
+  # copy the JSON to deploy/secrets/gcv-service-account.json, e.g.
+  scp gcv-service-account.json yordan@hez.yo-po.eu:~/scanner-demo/deploy/secrets/
+  chmod 600 deploy/secrets/gcv-service-account.json
+  ```
+
+  `deploy/secrets/` is gitignored and the file is mounted read-only into the server container at
+  `/run/secrets/`, never copied into an image layer — an image layer travels, a bind mount does not.
+  The app never sees it: Vision is called from the server and only from the server.
+
+  **Without the key the stack still runs.** The Vision endpoint answers 502 with a message naming
+  the credential, the phone records an attempt with `error` set, and the other engines are
+  unaffected — phase 08 criterion 6.
+
 ## 1. Record the production baseline
 
 Run this **before** touching anything, and keep the output. It is what "the production stack is

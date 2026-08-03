@@ -24,7 +24,7 @@ export interface MethodDescriptor {
 export const METHODS: readonly MethodDescriptor[] = [
   { method: 'mlkit', label: 'ML Kit · on-device', unavailable: null },
   { method: 'onnx-paddleocr', label: 'Self-hosted OCR', unavailable: null },
-  { method: 'gcv', label: 'Google Cloud Vision', unavailable: 'Phase 08' },
+  { method: 'gcv', label: 'Google Cloud Vision', unavailable: null },
   { method: 'vlm', label: 'VLM', unavailable: 'Phase 09' },
 ];
 

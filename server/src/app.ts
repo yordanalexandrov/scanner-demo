@@ -10,6 +10,7 @@ import {
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import type { Env } from './env.js';
 import type { Db } from './db/client.js';
+import { createGcvEngine } from './engines/gcv.js';
 import { createLocalOcrEngine } from './engines/localOcr.js';
 import type { OcrEngine } from './engines/types.js';
 import { InvalidImagePathError } from './lib/imagePaths.js';
@@ -26,10 +27,12 @@ export interface BuildServerOptions {
   db: Db;
   /**
    * The self-hosted engine, injectable so a test can stand a stub in front of the route without a
-   * container. The process builds the real one from the environment - phases 08 and 09 add theirs
-   * beside it, behind the same interface.
+   * container. The process builds the real one from the environment - phase 09 adds its own beside
+   * these, behind the same interface.
    */
   localOcrEngine?: OcrEngine;
+  /** Google Cloud Vision, injectable for the same reason: a test must not call a billed API. */
+  gcvEngine?: OcrEngine;
 }
 
 /**
@@ -44,6 +47,15 @@ export async function buildServer(options: BuildServerOptions): Promise<FastifyI
     createLocalOcrEngine({
       baseUrl: env.OCR_SIDECAR_URL,
       timeoutMs: env.OCR_SIDECAR_TIMEOUT_MS,
+    });
+
+  // Constructing this costs nothing and calls nothing: the Vision client is built on first use, so
+  // a server with no Google credentials starts and serves exactly as it did before phase 08.
+  const gcvEngine =
+    options.gcvEngine ??
+    createGcvEngine({
+      timeoutMs: env.GCV_TIMEOUT_MS,
+      credentialsPath: env.GOOGLE_APPLICATION_CREDENTIALS ?? null,
     });
 
   fs.mkdirSync(env.imageDir, { recursive: true });
@@ -106,7 +118,16 @@ export async function buildServer(options: BuildServerOptions): Promise<FastifyI
   await fastify.register(createImageRoutes({ db, imageDir: env.imageDir, thumbDir: env.thumbDir }));
   await fastify.register(createBarcodeScanRoutes({ db }));
   await fastify.register(createAttemptRoutes({ db }));
-  await fastify.register(createOcrRoutes({ db, imageDir: env.imageDir, engine: localOcrEngine }));
+  await fastify.register(
+    createOcrRoutes({
+      db,
+      imageDir: env.imageDir,
+      endpoints: [
+        { url: '/api/v1/ocr/local', engine: localOcrEngine, label: 'the OCR sidecar' },
+        { url: '/api/v1/ocr/gcv', engine: gcvEngine, label: 'Google Cloud Vision' },
+      ],
+    }),
+  );
 
   return fastify;
 }
