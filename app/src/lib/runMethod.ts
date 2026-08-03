@@ -4,17 +4,20 @@ import {
   TIMING_VERSION,
   elapsed,
   measureAsync,
+  now,
   parseExpiryDate,
 } from '@scanner-demo/shared';
 import type {
   AttemptCreate,
   ImageVariant,
+  Method,
   Millis,
   OcrResponse,
   ParseResult,
   Timing,
 } from '@scanner-demo/shared';
 import { createAttempt } from '../api/attempts';
+import { recogniseWithSelfHostedOcr } from '../api/ocr';
 import { describeDevice } from '../device';
 import { recogniseWithMlKit } from './mlkit';
 
@@ -39,6 +42,14 @@ export interface PriorTiming {
 
 export interface RunMethodInput {
   imageId: string;
+  /**
+   * The row whose **bytes the server reads**, for the server-side methods. It differs from
+   * `imageId` exactly when an archived `original` is being re-run: the attempt hangs off the
+   * group's uploaded row - ADR-20 - while the pixels being recognised are the original's.
+   *
+   * On-device runs ignore it: they read `uri`, a file already on the handset.
+   */
+  sourceImageId: string;
   captureGroupId: string;
   /**
    * Which pixels were read, not which row they came from. Both on-device runs of one capture hang
@@ -73,43 +84,54 @@ function toMessage(failure: unknown, fallback: string): string {
   return failure instanceof Error ? failure.message : fallback;
 }
 
+/** What one recognition produced, before it becomes a row. `requestMs` is `null` on-device. */
+interface Recognised {
+  ocr: OcrResponse | null;
+  requestMs: Millis | null;
+  error: string | null;
+}
+
 /**
- * Runs ML Kit over one variant and records the outcome - success or failure.
+ * Parses, assembles the row and posts it - the half of a run that is identical for every method.
  *
- * A method that throws still produces an attempt row, with `error` set and `ocr: null`. A failure
- * is data: an engine that cannot read a package is a result about that engine, and dropping it
- * would quietly improve its scores.
+ * It is one function rather than one per method on purpose. `parseMs` has to mean the same thing in
+ * all four columns, and it only does if the same code measures the same parser on the same CPU;
+ * `totalMs` has to start at the same point; a failure has to become a row rather than a gap in
+ * every case. Four copies of this would be four opportunities for one of them to drift - ADR-15.
  */
-export async function runMlKit(input: RunMethodInput): Promise<RunMethodResult> {
-  let ocr: OcrResponse | null = null;
+async function record(
+  input: RunMethodInput,
+  method: Method,
+  recognised: Recognised,
+): Promise<RunMethodResult> {
+  const { ocr } = recognised;
+
   let parse: ParseResult | null = null;
   // `null` until the parser actually runs. A recognition that threw leaves nothing to parse, and
   // recording `0 ms` there would put a parse that never happened into every parse-time average -
   // ADR-10, and the global rule that a null measurement is null and never zero.
   let parseMs: Millis | null = null;
-  let error: string | null = null;
+  let error = recognised.error;
 
-  try {
-    ocr = await recogniseWithMlKit(input.uri, {
-      imageWidth: input.imageWidth,
-      imageHeight: input.imageHeight,
-    });
-
-    const parsed = await measureAsync(async () =>
-      parseExpiryDate(ocr?.blocks ?? [], { referenceDate: input.referenceDate }),
-    );
-    parse = parsed.value;
-    parseMs = parsed.ms;
-  } catch (failure: unknown) {
-    error = toMessage(failure, 'ML Kit failed to read the image');
+  if (ocr !== null && error === null) {
+    try {
+      const parsed = await measureAsync(async () =>
+        parseExpiryDate(ocr.blocks, { referenceDate: input.referenceDate }),
+      );
+      parse = parsed.value;
+      parseMs = parsed.ms;
+    } catch (failure: unknown) {
+      error = toMessage(failure, 'The result could not be parsed');
+    }
   }
 
   const timing: Timing = {
     ...input.prior,
-    // The on-device path has no server, so nothing measured on another clock appears here - ADR-10.
-    requestMs: null,
+    requestMs: recognised.requestMs,
+    // On the server paths these two are the server's own figures, on the server's clock. They are
+    // nested inside `requestMs` and are never added to it or subtracted from it - ADR-10.
     engineMs: ocr?.engineMs ?? null,
-    serverTotalMs: null,
+    serverTotalMs: ocr?.serverTotalMs ?? null,
     parseMs,
     totalMs: elapsed(input.startedAt),
   };
@@ -117,7 +139,7 @@ export async function runMlKit(input: RunMethodInput): Promise<RunMethodResult> 
   const attempt: AttemptCreate = {
     imageId: input.imageId,
     captureGroupId: input.captureGroupId,
-    method: 'mlkit',
+    method,
     inputVariant: input.inputVariant,
     device: DEVICE,
     ocr,
@@ -142,4 +164,66 @@ export async function runMlKit(input: RunMethodInput): Promise<RunMethodResult> 
       recordError: toMessage(failure, 'The attempt could not be recorded'),
     };
   }
+}
+
+/**
+ * Runs ML Kit over one variant and records the outcome - success or failure.
+ *
+ * A method that throws still produces an attempt row, with `error` set and `ocr: null`. A failure
+ * is data: an engine that cannot read a package is a result about that engine, and dropping it
+ * would quietly improve its scores.
+ */
+export async function runMlKit(input: RunMethodInput): Promise<RunMethodResult> {
+  let recognised: Recognised;
+
+  try {
+    const ocr = await recogniseWithMlKit(input.uri, {
+      imageWidth: input.imageWidth,
+      imageHeight: input.imageHeight,
+    });
+    // The on-device path has no server, so nothing measured on another clock appears here - ADR-10.
+    recognised = { ocr, requestMs: null, error: null };
+  } catch (failure: unknown) {
+    recognised = {
+      ocr: null,
+      requestMs: null,
+      error: toMessage(failure, 'ML Kit failed to read the image'),
+    };
+  }
+
+  return record(input, 'mlkit', recognised);
+}
+
+/**
+ * Runs the self-hosted sidecar over an image the server already holds, and records the outcome.
+ *
+ * **No pixels leave the phone here.** The bytes were uploaded once when the capture was stored, so
+ * this posts an image ID and waits. That is why `uploadMs` is not re-measured on this path and why
+ * `downloadMs` stays `null` even on a Library re-run: unlike ML Kit, this engine needs nothing on
+ * the handset.
+ *
+ * `requestMs` is the phone's own round trip and `engineMs` / `serverTotalMs` are the server's, on a
+ * clock this process shares nothing with. The gap between them is network time, and it is reported
+ * as a labelled estimate from the two stored fields rather than computed into one - ADR-10.
+ */
+export async function runLocalOcr(input: RunMethodInput): Promise<RunMethodResult> {
+  let recognised: Recognised;
+
+  // Started outside the try, so the wait is measured on both paths. How long the phone waited
+  // before a 504 arrived is the interesting half of a timeout; a row saying only "it broke" throws
+  // that away. Consumers separate the two by `error`, which is why a failed run is still a row.
+  const requestedAt = now();
+
+  try {
+    const ocr = await recogniseWithSelfHostedOcr(input.sourceImageId);
+    recognised = { ocr, requestMs: elapsed(requestedAt), error: null };
+  } catch (failure: unknown) {
+    recognised = {
+      ocr: null,
+      requestMs: elapsed(requestedAt),
+      error: toMessage(failure, 'The self-hosted engine failed to read the image'),
+    };
+  }
+
+  return record(input, 'onnx-paddleocr', recognised);
 }

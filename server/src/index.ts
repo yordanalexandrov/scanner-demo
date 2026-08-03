@@ -1,6 +1,8 @@
 import { buildServer } from './app.js';
 import { openDatabase } from './db/client.js';
+import { createLocalOcrEngine } from './engines/localOcr.js';
 import { loadEnv } from './env.js';
+import { warmUpEngine } from './lib/warmup.js';
 import { SERVER_VERSION } from './version.js';
 
 /**
@@ -13,7 +15,13 @@ import { SERVER_VERSION } from './version.js';
 async function main(): Promise<void> {
   const env = loadEnv();
   const { db, close: closeDatabase } = openDatabase(env.databasePath);
-  const fastify = await buildServer({ env, db });
+
+  const localOcrEngine = createLocalOcrEngine({
+    baseUrl: env.OCR_SIDECAR_URL,
+    timeoutMs: env.OCR_SIDECAR_TIMEOUT_MS,
+  });
+
+  const fastify = await buildServer({ env, db, localOcrEngine });
 
   let shuttingDown = false;
 
@@ -46,6 +54,33 @@ async function main(): Promise<void> {
     { version: SERVER_VERSION, imageDir: env.imageDir, databasePath: env.databasePath },
     'scanner-demo server ready',
   );
+
+  if (env.OCR_WARMUP) {
+    // Deliberately not awaited. The server is already listening and every route except the OCR one
+    // works without the sidecar; blocking the boot on a container that takes five seconds to load
+    // its models would make a deploy look hung. The cold figure is logged because it is the one the
+    // README reports separately - phase 07 item 16.
+    void warmUpEngine({ engine: localOcrEngine })
+      .then((result) => {
+        if (result.ok) {
+          fastify.log.info(
+            { coldStartMs: result.ms, attempts: result.attempts },
+            'OCR sidecar warm',
+          );
+        } else {
+          fastify.log.warn(
+            { attempts: result.attempts, reason: result.error },
+            'the OCR sidecar did not warm up; the first request will pay the model load',
+          );
+        }
+      })
+      // `warmUpEngine` is written not to reject, so this is the belt to that braces: an unhandled
+      // rejection here would take down a server that is already listening and serving every other
+      // route, turning an optional optimisation into a restart loop.
+      .catch((error: unknown) => {
+        fastify.log.error({ err: error }, 'the warm-up itself failed unexpectedly');
+      });
+  }
 }
 
 main().catch((error: unknown) => {

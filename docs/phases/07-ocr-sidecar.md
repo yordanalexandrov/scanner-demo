@@ -1,6 +1,7 @@
 # Phase 07 — Self-hosted OCR engine (sidecar container)
 
-**Status:** stage A complete; awaiting review · **Depends on:** 02, 06 · **Source:** spec milestone 7
+**Status:** complete — both stages, verified on the deployment box on 2026-08-03 ·
+**Depends on:** 02, 06 · **Source:** spec milestone 7
 
 ## Goal
 

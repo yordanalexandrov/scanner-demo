@@ -60,8 +60,15 @@ const queryBooleanSchema = z.enum(['true', 'false']).transform((value) => value 
  * date filter means to someone looking at the library. Pagination, by contrast, orders on
  * `createdAt`: that one is server-assigned and cannot be backdated by a gallery import, so it is
  * the only field a stable cursor can be built on.
+ *
+ * **Strict, so an unknown parameter is an error rather than a stripped one** - phase 07 item 22.
+ * A plain `z.object` drops what it does not recognise, which against a server older than the app
+ * turns every new filter into a silent no-op: verified on 2026-07-30, a server five commits behind
+ * answered an unknown filter with a full page of rows and the grid looked like it was filtering.
+ * A filter that lies is worse than one that fails, and the upload metadata is strict for the same
+ * reason - ADR-3.
  */
-export const imageListQuerySchema = z.object({
+export const imageListQuerySchema = z.strictObject({
   limit: z.coerce.number().int().min(1).max(IMAGE_LIST_MAX_LIMIT).default(IMAGE_LIST_DEFAULT_LIMIT),
   cursor: z.string().min(1).optional(),
   source: imageSourceSchema.optional(),
@@ -87,6 +94,23 @@ export const imageListQuerySchema = z.object({
 });
 
 export type ImageListQuery = z.infer<typeof imageListQuerySchema>;
+
+/**
+ * The body of every server-side OCR request: an image ID, and deliberately nothing else.
+ *
+ * **A path never appears here, and that is the point.** The server constructs the filesystem path
+ * from the ID it minted itself, so no client can name a file - spec, § Stack - Server. The schema is
+ * strict for the same reason `imageUploadMetaSchema` is: a stray `path`-like key must be an error
+ * rather than a field that is quietly ignored while looking like it was honoured.
+ *
+ * Phases 08 and 09 send the same body to their own endpoints. It lives here, once, because the app
+ * builds it and the server validates it - and two copies of a request shape drift.
+ */
+export const ocrRequestSchema = z.strictObject({
+  imageId: z.string().min(1),
+});
+
+export type OcrRequest = z.infer<typeof ocrRequestSchema>;
 
 export const imageListResponseSchema = z.object({
   items: z.array(imageRecordSchema),

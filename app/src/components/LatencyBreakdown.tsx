@@ -69,6 +69,26 @@ export function LatencyBreakdown({
       ? timing.requestMs - timing.serverTotalMs
       : null;
 
+  /**
+   * What the server spent outside the engine call - phase 07 criterion 12.
+   *
+   * **This is an exact figure, not an estimate**, because both operands come from the server's own
+   * clock. The guard on the scope is what keeps it that way: on the on-device path `engineMs` is
+   * measured on the *phone*, and subtracting it from a server figure would be exactly the
+   * cross-clock arithmetic ADR-10 forbids. `serverTotalMs` is already `null` there, so this is a
+   * rule stated rather than a bug prevented - and the next engine to arrive gets the rule.
+   *
+   * What it *means* depends on the scope, which is why the label below does too. For an engine that
+   * reports its own inference time, the difference is the process boundary. For this one, which
+   * reports none, the whole sidecar call is already inside `engineMs`, so the boundary is inside it
+   * and inseparable; what is left over is the handler's own work - the row read, the file read and
+   * the response.
+   */
+  const outsideEngineMs =
+    engineMsScope !== 'inference' && timing.serverTotalMs !== null && timing.engineMs !== null
+      ? timing.serverTotalMs - timing.engineMs
+      : null;
+
   return (
     <View style={styles.container}>
       {showCaptureCost && (
@@ -109,6 +129,22 @@ export function LatencyBreakdown({
           </Text>
         </View>
       ))}
+
+      {outsideEngineMs !== null && (
+        <View style={styles.row}>
+          <Text style={styles.rowLabel}>
+            Server, outside the call
+            <Text style={styles.note}>
+              {' '}
+              ·{' '}
+              {engineMsScope === 'inference+network'
+                ? 'handler only; the boundary is inside the engine figure'
+                : 'process boundary'}
+            </Text>
+          </Text>
+          <Text style={styles.rowValue}>{formatMs(outsideEngineMs)}</Text>
+        </View>
+      )}
 
       {networkEstimate !== null && (
         <View style={styles.row}>

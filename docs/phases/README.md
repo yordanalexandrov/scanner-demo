@@ -72,7 +72,7 @@ four once the remaining engines exist, so it blocks 07 rather than following it.
 | [05](05-capture-mlkit.md) | Expiry capture, on-device OCR, date parser | complete | Capture, two variants, parser tests |
 | [06](06-library.md) | Image library | complete | Grid, filters, additive re-runs |
 | [06b](06b-parser-and-timing-fixes.md) | Parser and timing corrections | complete | Recorded-block fixtures, re-runs, method totals that reconcile |
-| [07](07-ocr-sidecar.md) | Self-hosted OCR sidecar | not started | **Two stops:** spike report, then build-out |
+| [07](07-ocr-sidecar.md) | Self-hosted OCR sidecar | complete | **Two stops:** spike report, then build-out |
 | [08](08-gcv.md) | Google Cloud Vision engine | not started | GCV over existing library images |
 | [09](09-vlm.md) | VLM engine | not started | Model answer vs parser answer, provider swap |
 | [10](10-history.md) | History and JSON export | not started | The POC's actual deliverable |
@@ -86,6 +86,39 @@ its segments accounting for `Total 99.7 ms` to within 2.7 ms. Criterion 7's "a f
 not prevent the others" is only partly exercised while `mlkit` is the sole available method; phase 07 is
 the first that can show it. That session also found the `<Image>` header bug now recorded in
 [ADR-14](../decisions.md#adr-14--shared-package-build-and-thumbnail-authentication).
+
+Phase 07 stage B was first verified on 2026-07-31 on a 32-core workstation, and then **deployed to
+the box and re-verified there on 2026-08-03**, which is the run that counts. On the box, against the
+real phase 05–06 Library: the sidecar holds no published ports and is unreachable from the host
+while the server reaches it over the internal network; the image is pinned by `@sha256:` and
+`:latest` appears nowhere; the image volume mounts `:ro` and a write inside fails; the sidecar,
+running as UID 1000, reads back a file the server wrote; `{"imageId":"../../etc/passwd"}` returns
+400 with the engine never called; `docker compose pause` produced **504 at 30.013 s** and the next
+call after unpausing returned 200; `engineMs` 2131.1 ms sat inside `serverTotalMs` 2138.9 ms.
+
+Twenty consecutive warm requests on `94530004` gave a median `engineMs` of **1879.0 ms** with
+**IQR ÷ median = 9.4 %**, inside criterion 13's 20 % — and within 1.4 % of the stage A spike's
+independent 1.854 s. The startup warm-up paid the cold start at **3515.7 ms**, on its second attempt
+because the first arrived while the sidecar was still loading its models, which is what the retry is
+for. Running all ten Library images back to back, the sidecar peaked at **149.9 % CPU against its
+150 % cap** and **648 MiB against its 1 GiB limit**; the eight `garden-prod_supabase-*` containers
+were in exactly their baseline state before and after, and `emerald`, `garden` and `scanner` all
+answered 200 throughout. Scored with the shared parser, the deployed path reproduced the spike
+exactly: **7 of 10**, the same seven images, the same dates, every one by `sole-candidate`, the same
+three dot-matrix misses.
+
+**Criterion 16 closed the same day**, on an SM-S928B (Android 16) against the deployed box: three
+`onnx-paddleocr` attempts, no errors, every one parsing by `sole-candidate` — two Library re-runs and
+one fresh capture, which is how `uploadMs 438.6` appears on exactly one of the three. The segment
+nesting is what the run was for: `engineMs` 1836.4 inside `serverTotalMs` 1848.4 inside the phone's
+`requestMs` 2106.0, with `engineMsScope: "inference+network"` and `costEstimateUsd: 0` on all three.
+**`downloadMs` is `null` on every row, including the re-runs** — unlike ML Kit, this engine needs no
+pixels on the handset, so the segment did not happen and is not recorded as `0`. One row reads
+`2026-03-31 · expired`, which is the correct verdict on a March date in August and not a failure.
+
+Stage B also turned up a limit the spike did not reach, now in the README: peak resident memory is
+615 MiB on the 1200×1600 upload variant but **929 MiB on a 6000×4500 original**, against a 1 GiB
+`mem_limit` that `MAX_UPLOAD_BYTES` permits images to exceed. The box holds one such original.
 
 ## Global constraints
 

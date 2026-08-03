@@ -25,6 +25,20 @@ services:
       IMAGE_DIR: /data/images
       THUMB_DIR: /data/thumbs
       DATABASE_PATH: /data/db/scanner.sqlite
+      # Resolved on the internal network below, which has no route out and no published port.
+      OCR_SIDECAR_URL: http://ocr:9005
+
+    networks:
+      # Both, and it has to be spelled out: naming any network at all opts a service out of the
+      # default one, and the server needs that one for its published port and for the cloud
+      # providers phases 08 and 09 call.
+      - default
+      - ocr
+
+    depends_on:
+      # Start order only - Compose has no readiness signal to wait for here, and the image ships no
+      # health command that would not mean writing Python. The server's warm-up retries instead.
+      - ocr
 
     ports:
       # Loopback only. Ports 80 and 443 belong to the box's production nginx, which terminates TLS
@@ -50,6 +64,77 @@ services:
       options:
         max-size: '10m'
         max-file: '3'
+
+  # The self-hosted OCR engine - RapidOCR, which is PaddleOCR's models converted to ONNX, wrapped in
+  # a FastAPI server. A pre-built black box, configured from the outside and never opened: no Python
+  # is written here or anywhere else in this repository.
+  #
+  # Everything below was measured rather than assumed - docs/spikes/07-ocr-sidecar.md.
+  ocr:
+    # Pinned by digest, never by tag. There is no official image for this package; this is one
+    # person's build, and the pin buys reproducibility rather than trust. The models are pinned
+    # separately by the config above, so a replacement image is comparable rather than a fresh
+    # baseline - spike § 1.
+    image: qingchen0607/rapid-ocr-api@sha256:a1445b36179ec4218740035b5688c50b40ed46f576b394e95e9582ec44be966c
+    restart: unless-stopped
+
+    # One worker, against the image's own default of two. Each worker loads its own copy of the
+    # models, so the second costs 334 MiB - the difference between 978 MiB and 644 MiB resident -
+    # and buys nothing: 1.854 s against 1.922 s median, inside the noise. The app runs one method at
+    # a time by design, so there is no concurrency for a second worker to serve; two simultaneous
+    # requests measured *worse* than serialising them - spike §§ 4, 5.
+    command: ['bash', '-c', 'rapidocr_api -ip 0.0.0.0 -p 9005 -workers 1']
+
+    # The image runs as root and does not have to. Verified working as 1000:1000, which is also the
+    # UID that owns the image files the server writes - deploy/README.md.
+    user: '1000:1000'
+
+    # Verified working with nothing writable at all. `rapidocr_api` reads models and writes nothing.
+    read_only: true
+    tmpfs:
+      # ONNX Runtime and the multipart parser both want a scratch directory. Small and in memory, so
+      # a read-only root filesystem costs nothing operationally.
+      - /tmp:size=64m
+
+    networks:
+      # Internal, with no `ports:` anywhere in this service. The container is unreachable from the
+      # host and from the internet, and has no route out itself - which the spike used to prove the
+      # models load from inside the image rather than being downloaded at run time.
+      - ocr
+
+    volumes:
+      # Read-only, and **presently unused as a transport**. The engine accepts an HTTP upload or a
+      # base64 string and has no path parameter at all, so the server reads the bytes and posts
+      # them - spike §§ 2, 3. The mount stays because the specification asks for it, because it
+      # costs nothing, and because it is the difference between a one-line change and a
+      # redeployment if a future image ever accepts a path. It is not load-bearing today.
+      - scanner-images:/data/images:ro
+      - ./deploy/rapidocr/config.yaml:/usr/local/lib/python3.10/site-packages/rapidocr/config.yaml:ro
+
+    # The same two limits as the server, for the same reason - ADR-18. `mem_limit` is 1g against a
+    # measured peak of 644 MiB (VmHWM 626 MiB); 768m was judged too tight to absorb a larger image.
+    #
+    # The sum of the two `cpus:` exceeds the box's two cores on purpose: the server is idle while
+    # the sidecar infers and vice versa, so the overcommit costs nothing on this workload and
+    # capping either at 1.0 would cost 55 % latency - spike § 4.
+    cpus: 1.5
+    mem_limit: 1g
+    mem_reservation: 256m
+
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+networks:
+  # The default bridge, named explicitly because the server now opts out of implicit membership.
+  default:
+
+  # No route to the internet and no route in. `docker compose ps` shows the sidecar with no
+  # published ports, and a curl from the host cannot reach it - phase 07 criterion 4.
+  ocr:
+    internal: true
 
 volumes:
   scanner-images:

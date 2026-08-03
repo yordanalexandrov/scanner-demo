@@ -34,6 +34,23 @@ const envSchema = z.object({
     .int()
     .min(1)
     .default(32 * 1024 * 1024),
+
+  // The OCR sidecar, on the internal Docker network. It publishes no ports, so this hostname
+  // resolves nowhere else - phase 07.
+  OCR_SIDECAR_URL: z.string().min(1).default('http://ocr:9005'),
+
+  // Generous against a measured warm median of 1.85 s and a cold 3.9 s, because the box is shared
+  // with production and a 0.5-CPU moment costs 6.4 s - ADR-18. It is a limit on hanging, not a
+  // latency budget: a request that outlives it is a failure, and the endpoint says so rather than
+  // holding the phone open.
+  OCR_SIDECAR_TIMEOUT_MS: z.coerce.number().int().min(1).default(30_000),
+
+  // One dummy inference at startup, so the first real request is not a model load. Off in tests,
+  // which have no sidecar to call and should not spend five retries discovering that.
+  OCR_WARMUP: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((value) => value === 'true'),
 });
 
 export type Env = z.infer<typeof envSchema> & {
