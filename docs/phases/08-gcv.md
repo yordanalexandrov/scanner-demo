@@ -1,6 +1,6 @@
 # Phase 08 — Google Cloud Vision engine
 
-**Status:** complete, bar two handset criteria · **Depends on:** 06, 07 · **Source:** spec milestone 8
+**Status:** complete · **Depends on:** 06, 07 · **Source:** spec milestone 8
 
 ## Goal
 
@@ -110,13 +110,13 @@ plus twenty consecutive calls on `94530004` for the latency figures.
 | 1 · `OcrResponse` validates, non-empty `blocks` | **met** — 29 of 29 answered 200, which is the response schema passing the server's own serializer; 28 returned blocks, the 29th is an 8 KB image with no text |
 | 2 · boxes land on the right text | **met** — 16 boxes drawn over `94530004` and checked by eye; each on its text, including the rotated and inverted labels, whose axis-aligned boxes are larger than the glyphs as ADR-5 accepts. Vision's page size matched the stored file, so the EXIF case did not arise |
 | 3 · `engineMsScope` is `"inference+network"` | **met** on every response |
-| 4 · `costEstimateUsd` non-zero, `pricingVersion` recorded | **met in the response**: `0.0015`, `2026-08-03`. Recorded *on the attempt* needs the handset — the app writes those rows, ADR-15 |
+| 4 · `costEstimateUsd` non-zero, `pricingVersion` recorded | **met** — `0.0015` and `2026-08-03` in the response and on both attempt rows the handset wrote |
 | 5 · price entry carries source and retrieval date | **met** — `packages/shared/src/pricing.ts` |
 | 6 · bad credentials become a recorded error | **met, twice over.** A missing key file produced `502 engine_failed` naming the path, with the server still serving; billing disabled on the project produced `502` carrying Google's own sentence. Neither killed the process, which is not free — see the departure below |
 | 7 · forced timeout is a recorded failure | **met** — `GCV_TIMEOUT_MS=1` produced `504 engine_timeout`, "Cloud Vision did not answer within 1 ms" |
 | 8 · no Google credential or SDK in the app | **met** — the criterion's grep finds nothing; `@google-cloud/vision` is in `server/package.json` only |
-| 9 · run over Library images, Cyrillic included | **met server-side** — 21 of 29 parse a date, 17 of them by `anchor-proximity` because this is the first engine that reads `Годен до` (confidence 0.984). Attempt rows for the same images need the handset |
-| 10 · two runs, two attempt rows | **pending** — the app is the sole author of attempt rows, so this one cannot be shown from the server |
+| 9 · run over Library images, Cyrillic included | **met** — 21 of 29 parse a date, 17 of them by `anchor-proximity` because this is the first engine that reads `Годен до` (confidence 0.984), and the handset run reproduced it on the recorded rows |
+| 10 · two runs, two attempt rows | **met** — two runs on `94530004` produced two rows under one `gcv · upload` group with a median across them, nothing overwritten |
 
 **Latency**, twenty calls on `94530004`: warm median **266.5 ms**, IQR ÷ median **12.9 %**, min
 228.3, max 333.4. `serverTotalMs` sat 7.4 ms above `engineMs` at the median. The sidecar's figure on
@@ -139,6 +139,26 @@ belongs to a checkpoint of its own.
 
 Production was checked before and after: the eight `garden-prod_supabase-*` containers unchanged,
 `emerald`, `garden` and `scanner` all 200.
+
+### The handset half, same day
+
+On an SM-S928B (Android 16) against the deployed box, two Library re-runs of `gcv` on `94530004`:
+
+- **Two rows under one `gcv · upload` group**, `2 of 2 extracted a date`, median method total 551.0 ms
+  and median engine 315.7 ms across them. Nothing was overwritten — the additive rule holds on this
+  method as it does on the others.
+- **The segments nest the way ADR-10 requires**: `engineMs` 298.3 inside `serverTotalMs` 311 inside
+  the phone's `requestMs` 536 inside `totalMs` 538.1. The sidecar's equivalent row reads 1836.4 /
+  1848.4 / 2106.0, so the ~225 ms the phone spends outside the server is the handset-to-box leg on
+  both paths and is not subtracted from anything - it is two stored fields.
+- **`captureMs`, `downscaleMs` and `downloadMs` are all `null`, not `0`.** A re-run captured nothing
+  and uploaded nothing, and unlike ML Kit this engine needs no pixels on the handset, so no download
+  happened either.
+- `costEstimateUsd` `0.0015` and `pricingVersion` `2026-08-03` on both rows.
+- Both reached `2027-07-31 valid · month` **by `anchor-proximity`**, confidence 0.9 with signals
+  `anchor-matched` and `month-precision-only`. The same screen shows ML Kit reaching the same date on
+  the same image by `sole-candidate`, which is the side-by-side this checkpoint asks for: identical
+  answer, different route, because only one of the two can read the words next to the date.
 
 Deliberate departures from the phase document, both recorded in the code that makes them:
 

@@ -73,7 +73,7 @@ four once the remaining engines exist, so it blocks 07 rather than following it.
 | [06](06-library.md) | Image library | complete | Grid, filters, additive re-runs |
 | [06b](06b-parser-and-timing-fixes.md) | Parser and timing corrections | complete | Recorded-block fixtures, re-runs, method totals that reconcile |
 | [07](07-ocr-sidecar.md) | Self-hosted OCR sidecar | complete | **Two stops:** spike report, then build-out |
-| [08](08-gcv.md) | Google Cloud Vision engine | complete, bar two handset criteria | GCV over existing library images |
+| [08](08-gcv.md) | Google Cloud Vision engine | complete | GCV over existing library images |
 | [09](09-vlm.md) | VLM engine | not started | Model answer vs parser answer, provider swap |
 | [10](10-history.md) | History and JSON export | not started | The POC's actual deliverable |
 
@@ -133,10 +133,18 @@ ML Kit's six is the known upside-down misread.
 Two failures were exercised deliberately and both behaved: a missing key file and billing disabled
 on the Google project each produced a 502 carrying the actual reason, with the server still serving,
 and `GCV_TIMEOUT_MS=1` produced a 504. Sixteen boxes drawn over `94530004` land on their text.
-**Criterion 10, and the attempt-row half of criterion 4, remain open**: the app is the sole author of
-attempt rows (ADR-15), so they need a handset run. The one defect the run found is recorded rather
-than fixed — Vision has a ~1.6 s cold start on the first call of a process, inside `engineMs`, that
-nothing warms; see [08-gcv.md](08-gcv.md#the-acceptance-run-2026-08-03).
+
+**The handset half closed the same day**, on an SM-S928B (Android 16) against the deployed box: two
+re-runs of `gcv` on `94530004` produced **two rows under one group** with a median across them,
+`engineMs` 298.3 inside `serverTotalMs` 311 inside the phone's `requestMs` 536 inside `totalMs`
+538.1, `captureMs`/`downscaleMs`/`downloadMs` all `null` rather than `0`, and `costEstimateUsd`
+0.0015 with `pricingVersion` 2026-08-03 on both. Both reached `2027-07-31` **by `anchor-proximity`**
+where ML Kit reaches the same date on the same image by `sole-candidate` — the same answer by a
+different route, because only one of the two can read the words next to the date.
+
+The one defect the run found is recorded rather than fixed — Vision has a ~1.6 s cold start on the
+first call of a process, inside `engineMs`, that nothing warms; see
+[08-gcv.md](08-gcv.md#the-acceptance-run-2026-08-03).
 
 ## Global constraints
 

@@ -21,8 +21,7 @@ comparability wins.
 ## Status
 
 **Phases 01 to 08 of 10 are complete; phase 09 is next.** Phase 08 ran against the real Cloud Vision
-API from the deployment box on 2026-08-03; the two criteria that need attempt rows written by the
-handset are noted in [its phase document](docs/phases/08-gcv.md). Every
+API from the deployment box on 2026-08-03, and from an SM-S928B against it the same day. Every
 record the harness stores is defined once in `packages/shared`. The server is deployed at
 `scanner.yo-po.eu`, stores, serves and thumbnails images, and records barcode decode latencies. The
 Android app builds as an Expo development build, navigates its screens, scans EAN-13 with the decode
