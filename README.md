@@ -74,15 +74,29 @@ image at boot, so no real measurement pays it:
 
 | Figure | Deployment box (2 cores, shared) | Workstation (32 cores, `cpus: 1.5`) |
 |---|---|---|
-| Cold start, first real request | 3.4–3.9 s | 769 ms |
-| Warm median | 1.854 s | 506 ms |
-| Spread, IQR ÷ median | 12.0 % (n=25) | 12.5 % (n=20) |
+| Cold start, first real request | **3.516 s** | 769 ms |
+| Warm median | **1.879 s** | 506 ms |
+| Spread, IQR ÷ median | **9.4 % (n=20)** | 12.5 % (n=20) |
 
-The box figures come from the stage A spike, under the co-tenancy
+The box figures are the phase 07 stage B run of 2026-08-03, on `94530004`, under the co-tenancy
 [ADR-18](docs/decisions.md) describes — two cores shared with a live Supabase stack and two
-production sites. The workstation figures are the phase 07 stage B verification run, on the same
-`cpus: 1.5` and `mem_limit: 1g` the box uses, over a synthetic dated image; they are quoted to show
-the shape holds, not as a benchmark result. **Only the box figures are the benchmark.**
+production sites, both answering 200 throughout. They land within 1.4 % of the stage A spike's
+independent 1.854 s, measured three days earlier by a different harness. The cold figure is the
+startup warm-up's own first inference, which is where it is meant to be paid.
+
+The workstation figures are the same code on a 32-core machine with the same `cpus: 1.5` and
+`mem_limit: 1g`, over a synthetic dated image. They are quoted to show the shape holds on other
+hardware. **Only the box figures are the benchmark**, and moving the engine elsewhere would also
+break `costEstimateUsd: 0`, which ADR-11 justifies as sunk VPS capacity.
+
+Under load — the ten library images back to back — the sidecar peaked at **149.9 % CPU against its
+150 % cap** and **648 MiB against its 1 GiB limit**, and all eight production containers stayed as
+they were.
+
+**Accuracy on the deployed path: 7 of 10 images parse to a date**, all by `sole-candidate`, which is
+the same seven, the same dates and the same three misses the stage A spike recorded under
+`parser-v2`. Read that figure with the three qualifications below — it is 2 of 5 by distinct
+product, and 0 of 3 on dot-matrix dates.
 
 **The warm-up only warms the size it used.** Cold start is per input size as well as per process, so
 the dummy image is the 1200×1600 upload variant the app actually produces. A Library re-run over an

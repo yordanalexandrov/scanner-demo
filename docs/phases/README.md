@@ -87,32 +87,32 @@ not prevent the others" is only partly exercised while `mlkit` is the sole avail
 the first that can show it. That session also found the `<Image>` header bug now recorded in
 [ADR-14](../decisions.md#adr-14--shared-package-build-and-thumbnail-authentication).
 
-Phase 07 stage B was verified on 2026-07-31 against the real container, but **on a 32-core
-workstation rather than on the deployment box**, because this session had no shell on the box. What
-that run establishes is everything that is a property of the code and the container: the sidecar
-holds no published ports and is unreachable from the host while the server reaches it over the
-internal network; `docker compose config` pins it by `@sha256:` and `:latest` appears nowhere; the
-image volume mounts `:ro` and a write inside fails; the sidecar, running as UID 1000, reads back a
-file a real upload had just written; `POST /api/v1/ocr/local` returns a response that validates
-against `ocrResponseSchema`, and `{"imageId":"../../etc/passwd"}` returns 400 with the engine never
-called; a `docker compose pause` produced **504 at 30.005 s**, the configured limit, rather than a
-hang; `cpu.max` is `150000 100000` and `memory.max` 1 GiB, with peak CPU at the cap and peak
-`VmHWM` 615 MiB on the upload variant. Twenty consecutive warm requests gave a median `engineMs` of
-506.0 ms with **IQR ÷ median = 12.5 %**, inside criterion 13's 20 %, and the first request after a
-sidecar restart cost 768.9 ms against that median. Three simultaneous requests came back at 500, 579
-and 509 ms of `engineMs` with `serverTotalMs` of 504, 1083 and 1597 ms — the queue serialising them,
-with the waiting counted where it belongs.
+Phase 07 stage B was first verified on 2026-07-31 on a 32-core workstation, and then **deployed to
+the box and re-verified there on 2026-08-03**, which is the run that counts. On the box, against the
+real phase 05–06 Library: the sidecar holds no published ports and is unreachable from the host
+while the server reaches it over the internal network; the image is pinned by `@sha256:` and
+`:latest` appears nowhere; the image volume mounts `:ro` and a write inside fails; the sidecar,
+running as UID 1000, reads back a file the server wrote; `{"imageId":"../../etc/passwd"}` returns
+400 with the engine never called; `docker compose pause` produced **504 at 30.013 s** and the next
+call after unpausing returned 200; `engineMs` 2131.1 ms sat inside `serverTotalMs` 2138.9 ms.
 
-**Three criteria are not met by that run and need the box.** Criterion 13's figures and criterion 15's
-"the production Supabase containers stay healthy" are only meaningful on the two-core box under
-co-tenancy — the workstation numbers are quoted in the README as shape, not as benchmark. Criterion
-17 asks for the phase 05–06 Library images; the local volume holds only synthetic images from earlier
-local runs, and the real dataset lives on the box. Criterion 16 needs the app on a handset: the
-Self-hosted button is enabled and wired, and no attempt row has been produced from a device yet.
+Twenty consecutive warm requests on `94530004` gave a median `engineMs` of **1879.0 ms** with
+**IQR ÷ median = 9.4 %**, inside criterion 13's 20 % — and within 1.4 % of the stage A spike's
+independent 1.854 s. The startup warm-up paid the cold start at **3515.7 ms**, on its second attempt
+because the first arrived while the sidecar was still loading its models, which is what the retry is
+for. Running all ten Library images back to back, the sidecar peaked at **149.9 % CPU against its
+150 % cap** and **648 MiB against its 1 GiB limit**; the eight `garden-prod_supabase-*` containers
+were in exactly their baseline state before and after, and `emerald`, `garden` and `scanner` all
+answered 200 throughout. Scored with the shared parser, the deployed path reproduced the spike
+exactly: **7 of 10**, the same seven images, the same dates, every one by `sole-candidate`, the same
+three dot-matrix misses.
+
+**Criterion 16 is the one still open**: it needs the app on a handset, and no attempt row has been
+produced from a device yet. The button is enabled and wired.
 
 Stage B also turned up a limit the spike did not reach, now in the README: peak resident memory is
 615 MiB on the 1200×1600 upload variant but **929 MiB on a 6000×4500 original**, against a 1 GiB
-`mem_limit` that `MAX_UPLOAD_BYTES` permits images to exceed.
+`mem_limit` that `MAX_UPLOAD_BYTES` permits images to exceed. The box holds one such original.
 
 ## Global constraints
 
