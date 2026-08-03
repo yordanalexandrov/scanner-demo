@@ -38,6 +38,7 @@ had to resolve to be executable. One record per decision.
 | [20](#adr-20--a-capture-group-has-one-anchor-row-and-the-librarys-filters-read-the-group) | One anchor row per capture group; group-scoped Library filters | Accepted | 06, 10 |
 | [21](#adr-21--candidate-boundaries-and-the-order-of-the-sanity-window) | Candidate boundaries; sanity window filters before the rule | Accepted | 06b, amends 6 and 16 |
 | [22](#adr-22--totalms-starts-at-the-method-invocation) | `totalMs` starts at the method invocation | Accepted | 06b, amends 10 |
+| [23](#adr-23--a-date-with-no-year-is-not-a-date) | A date with no year is not a date | **Deviation** | amends 6 and 16 |
 
 **Rule names, not rule numbers.** The specification numbers its disambiguation rules 1–4;
 [ADR-6](#adr-6--parser-rule-order-and-referencedate) inserts extraction as a step and renumbers them. To
@@ -1007,3 +1008,72 @@ The result view gains a line: the capture cost, shown next to the total rather t
 machine-path sum may be shown too, provided it says that the operator interval is excluded.
 
 **Status.** Accepted 2026-07-31 — the owner chose method-invocation timing when authorising phase 06b.
+
+---
+
+## ADR-23 — A date with no year is not a date
+
+**Context.** The specification's disambiguation rules include a year-less `DD/MM` reading: the parser
+names "the next such day at or after the reference date", so `25/03` becomes 25 March of whichever
+year keeps it from being already expired. It is a reasonable reading of "the year is implied", and
+[ADR-6](#adr-6--parser-rule-order-and-referencedate)'s acceptance table lists two rows that depend on
+it. It was implemented that way in phase 05 and survived the phase 06b corrections.
+
+On 2026-08-03 the widened dataset produced the case that settles it. A real package carried the
+dot-matrix stamp
+
+```
+30.06.25
+AA400307:20
+01      000
+```
+
+printed **upside down** relative to the photograph. ML Kit read the 180-degree-rotated `6` as a `9`
+and dropped the year entirely, returning `30.09`. The parser then supplied the reference year and
+recorded:
+
+```
+date "2026-09-30"  precision "day"  status "valid"  rule "sole-candidate"
+```
+
+A fully specified, day-precision, *valid* expiry date. The year appears on no packaging anywhere, and
+the product had in fact expired the previous June. The self-hosted engine — whose pipeline includes a
+text-angle classifier, `ch_ppocr_mobile_v2.0_cls_infer.onnx` with `label_list: ["0", "180"]` — read
+the same stamp correctly as `30.06.25` and reported `2025-06-30`, `expired`.
+
+**Decision.** A candidate with no year is not a candidate. The year-less `DD/MM` reading is removed;
+a two-component run is `MM/YY` or `MM/YYYY` or it is nothing. `PARSER_VERSION` becomes `parser-v3`,
+and `parser-v1` and `parser-v2` stay in the schema so existing rows keep saying which rules produced
+them.
+
+Two rows leave the phase 05 acceptance table — `EXP 25/03 → 2026-03-25` and `EXP 05/12 → 2025-12-05`.
+**This is a deliberate departure from the written specification**, recorded here rather than quietly
+implemented.
+
+A two-digit *year* is untouched. `30.06.25` still resolves to 2025 by
+[ADR-16](#adr-16--separators-and-year-widths-are-normalised-before-matching): the year was read off
+the package and only its century was supplied, which is a different act from inventing the year
+outright.
+
+**Rationale.** The failure is not that the year was guessed. It is that a guessed year was
+**indistinguishable in the record from a read one** — same `day` precision, same `valid` status,
+nothing in `signals` to separate them. Marking it instead of removing it was considered and rejected:
+a signal helps a reader who is already suspicious, while the number that reaches a chart is still
+wrong, and this repository exists to produce numbers that can be trusted without a footnote.
+
+A miss is recoverable — it shows up as a gap and invites another look. A confident wrong answer is
+not: it enters an average, moves an engine's score, and looks exactly like a success. The harness
+compares four methods on accuracy, so a rule that manufactures the most decision-relevant component
+of the answer corrupts the comparison rather than improving coverage.
+
+**Consequences.** Packaging that prints only `DD/MM` yields no date on any of the four methods. That
+is a real loss of coverage, accepted knowingly: such a package does not state an expiry year, and no
+amount of parsing recovers one.
+
+Measured before the change was merged: across the twenty-four images then in the Library, scored from
+stored self-hosted engine output, `parser-v2` and `parser-v3` produce **identical results on all
+twenty-four**. The only behaviour that changed in practice is the ML Kit reading above, which now
+reports no date instead of a fabricated one.
+
+**Status.** Accepted 2026-08-03, on the owner's decision after the case above was traced to the
+pixels.

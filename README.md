@@ -213,9 +213,19 @@ how the benchmark numbers should be read.
   to food packaging — stamped on the line, not printed with the artwork — so the figure that predicts
   real-world behaviour is that 0 of 3, not the 7 of 10 headline. Hardware does not move it; a GPU
   might, and the engine that reads dot-matrix by context is a VLM, which phase 09 measures.
-- **The accuracy figures rest on too small a dataset.** Ten photographs of five products, six of them
-  the same box. That is enough to compare engines against each other on identical inputs and not
-  enough to claim an accuracy rate. Widening it is a prerequisite for phases 08–10 meaning anything.
+- **The accuracy figures rest on too small a dataset.** Widened on 2026-08-03 from ten photographs of
+  five products to twenty-four; still small enough that it compares engines on identical inputs
+  rather than supporting an accuracy rate.
+- **Packaging that prints a day and a month but no year yields no date at all** — on every method,
+  since [ADR-23](docs/decisions.md). The parser used to supply the year, and the rule was removed
+  after it turned a misread stamp into a confident wrong answer: ML Kit read an upside-down `30.06.25`
+  as `30.09`, and the parser reported `2026-09-30` as a `day`-precision, `valid` date for a product
+  that had expired the previous year. A guessed year was indistinguishable in the record from a read
+  one. The loss of coverage is real and accepted: such a package does not state an expiry year.
+- **Two engines can disagree on the same pixels, and the disagreement is structural.** On that stamp
+  the self-hosted engine was right and ML Kit was wrong, because RapidOCR's pipeline includes a
+  180-degree text-angle classifier and an upside-down `6` is a `9` without one. Dot-matrix dates are
+  frequently stamped at whatever orientation the packaging line applies them.
 - **Gallery imports have no controlled capture conditions.** Their results are valid for comparing OCR
   accuracy and meaningless for comparing capture latency. The History and Library screens filter on
   this so the two never land in the same average silently.

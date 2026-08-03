@@ -31,8 +31,10 @@ describe('date parser - the phase 05 acceptance table', () => {
     ['DLC 01/03/27', '2027-03-01', 'day', 'valid'],
     ['Годен до 03/2027', '2027-03-31', 'month', 'valid'],
     ['EXP 03/27', '2027-03-31', 'month', 'valid'],
-    ['EXP 25/03', '2026-03-25', 'day', 'valid'],
-    ['EXP 05/12', '2025-12-05', 'day', 'valid'],
+    // `EXP 25/03` and `EXP 05/12` used to sit here, reading 2026-03-25 and 2025-12-05. **Both were
+    // removed from the table on 2026-08-03, deliberately departing from the specification** - a
+    // year-less run now yields no date at all, and the two cases have their own tests below.
+    // ADR-23 records the measurement that settled it.
     ['311225', '2025-12-31', 'day', 'valid'],
     ['EXP 01.06.2024', '2024-06-01', 'day', 'expired'],
   ])('%s → %s', (text, date, precision, status) => {
@@ -56,21 +58,49 @@ describe('date parser - the phase 05 acceptance table', () => {
     expect(result.confidence.signals).not.toContain('ambiguous-numeric');
   });
 
-  it('resolves two-component dates by position, not by "either number over 12"', () => {
+  it('resolves a two-component date as month and year, by position', () => {
     // Second component out of month range → it is the year.
     expect(parse('EXP 03/27').expiry?.date).toBe('2027-03-31');
-    // First component out of month range → it is the day, and the year is the next occurrence.
-    expect(parse('EXP 25/03').expiry?.date).toBe('2026-03-25');
+    // A two-digit year is still a year that was *read*. Only the century is supplied - ADR-16.
+    expect(parse('EXP 03/2027').expiry?.date).toBe('2027-03-31');
   });
 
-  it('flags a genuinely ambiguous two-component date and lowers its score', () => {
-    // Both components are plausible months. The `MM/YY` reading is May 2012, which the sanity
-    // window rejects, so the `DD/MM` reading wins - but the guess is recorded either way.
+  it('refuses a date with no year rather than supplying one - ADR-23', () => {
+    // `25/03` can only be the 25th of March, and the package does not say of which year. The old
+    // reading named the next occurrence, which produced a confident, fully-specified date whose
+    // year appeared nowhere on the packaging.
+    const result = parse('EXP 25/03');
+
+    expect(result.expiry).toBeNull();
+    expect(result.rule).toBe('none');
+    expect(result.candidates).toEqual([]);
+  });
+
+  it('refuses a two-component date whose month reading fails the sanity window', () => {
+    // `05/12` reads as May 2012 - the only reading left once a year-less one is not a date. It is
+    // outside the sanity window, so it is rejected *visibly*: recorded as a candidate with a
+    // reason, never silently dropped.
     const result = parse('EXP 05/12');
-    expect(result.expiry?.date).toBe('2025-12-05');
-    expect(result.ambiguous).toBe(true);
-    expect(result.confidence.signals).toContain('ambiguous-numeric');
-    expect(result.confidence.score).toBeLessThan(parse('EXP 12.03.2027').confidence.score);
+
+    expect(result.expiry).toBeNull();
+    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates[0]?.date).toBe('2012-05-31');
+    expect(result.candidates[0]?.rejectedFor).not.toBeNull();
+  });
+
+  it('does not invent a year for a dot-matrix date read without one - ADR-23', () => {
+    // Observed on 2026-08-03, on a real package, and the reason this rule exists. The stamp reads
+    // `30.06.25` upside down; ML Kit read the rotated `6` as a `9` and dropped the year, giving
+    // `30.09`. The parser then supplied 2026 and reported `2026-09-30` as a `day`-precision,
+    // `valid` date - a year that is on no packaging anywhere, on a product that expired in 2025.
+    const result = parse('NUTTY ALMOND NO SUGARS 000 AR400307:20 30.09, L LNUT');
+
+    expect(result.expiry).toBeNull();
+
+    // The engine that read the same stamp correctly is unaffected.
+    expect(parse('NUTTY ALMOND NO SUGARS LNUT 000.10 8A400307:20 30.06.25').expiry?.date).toBe(
+      '2025-06-30',
+    );
   });
 
   it('reports the production date rather than discarding it - ADR-6', () => {

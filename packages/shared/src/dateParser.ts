@@ -187,16 +187,25 @@ function resolveYear(raw: string, referenceDate: Date): number {
 }
 
 /**
- * A `DD/MM` with no year names the next such day at or after `referenceDate` - the reading of "the
- * year is implied" that does not put an expiry date in the past on the day it was printed.
+ * **A date with no year is not a date here** - ADR-23.
+ *
+ * There used to be a `nextOccurrence` helper on this spot, which read a year-less `DD/MM` as the
+ * next such day at or after `referenceDate`. It was the specification's own rule, and it is gone
+ * on the strength of a measurement rather than a preference.
+ *
+ * On 2026-08-03 a real package carried the dot-matrix stamp `30.06.25`, printed upside down. ML Kit
+ * read the rotated `6` as a `9` and dropped the year, giving `30.09`; this parser supplied 2026 and
+ * reported **`2026-09-30`, `precision: "day"`, `status: "valid"`** - a fully specified, confident
+ * date whose year appears on no packaging anywhere, for a product that had expired the previous
+ * year. The self-hosted engine, whose pipeline includes a 180-degree text-angle classifier, read the
+ * same stamp correctly.
+ *
+ * The failure is not that the year was guessed; it is that a guessed year was indistinguishable in
+ * the record from a read one. Both readings carried `day` precision and a `valid` status. The
+ * benchmark exists to produce numbers that can be trusted, and a rule that manufactures the most
+ * decision-relevant component of the answer cannot serve that - a miss is recoverable, a confident
+ * wrong answer is not.
  */
-function nextOccurrence(day: number, month: number, referenceDate: Date): number {
-  const year = referenceDate.getUTCFullYear();
-  if (!isValidDayMonth(day, month, year)) {
-    return year + 1;
-  }
-  return toUtcDate(year, month, day).getTime() >= referenceDate.getTime() ? year : year + 1;
-}
 
 // ---------------------------------------------------------------------------------------------
 // Candidate extraction
@@ -263,7 +272,8 @@ const PATTERNS: readonly Pattern[] = [
     },
   },
   {
-    // Two components - `MM/YYYY`, `MM/YY` or a year-less `DD/MM`. Resolved positionally by rule 5.
+    // Two components - `MM/YYYY` or `MM/YY`. A year-less `DD/MM` is no longer among the readings,
+    // so this pattern names a month and a year or it names nothing - ADR-23.
     regex: new RegExp(`^(\\d{1,2})${SEP}(\\d{2,4})`),
     handle: ([, first, second], referenceDate) =>
       twoComponent(first ?? '', second ?? '', referenceDate),
@@ -283,76 +293,37 @@ const PATTERNS: readonly Pattern[] = [
 ];
 
 /**
- * Rule 5 of ADR-6, applied positionally.
+ * Rule 5 of ADR-6, applied positionally - and, since ADR-23, applied to one reading rather than two.
  *
- * The specification's own wording - "if either number exceeds 12 it is the day" - gets the common
- * case backwards: in `03/25` the `25` is a year. Which position the out-of-range number sits in is
- * what decides.
+ * The specification's wording - "if either number exceeds 12 it is the day" - gets the common case
+ * backwards: in `03/25` the `25` is a year. Which position the out-of-range number sits in is what
+ * decides, and the only reading that survives is `MM/YY` or `MM/YYYY`.
+ *
+ * **The `DD/MM` reading is gone.** With no year on the package there is no expiry date to report,
+ * so a run whose first component is not a month yields nothing at all rather than a day and a
+ * manufactured year. That also removes the last source of ambiguity here: two components are now a
+ * month and a year or they are not a date, so nothing produced by this function is `ambiguous`.
  */
 function twoComponent(
   first: string,
   second: string,
   referenceDate: Date,
 ): Omit<Candidate, 'raw' | 'bbox'> | null {
-  const a = Number(first);
-  const b = Number(second);
+  const month = Number(first);
+  const year = Number(second);
 
-  // A four-digit second component can only be a year, whatever its value.
-  if (second.length === 4) {
-    return a >= 1 && a <= 12
-      ? { year: b, month: a, day: null, precision: 'month', ambiguous: false }
-      : null;
+  if (month < 1 || month > 12) {
+    return null;
   }
 
-  const asMonthYear =
-    a >= 1 && a <= 12
-      ? {
-          year: resolveTwoDigitYear(b, referenceDate),
-          month: a,
-          day: null,
-          precision: 'month' as const,
-        }
-      : null;
-
-  const asDayMonth =
-    b >= 1 && b <= 12 && a >= 1 && a <= 31
-      ? {
-          year: nextOccurrence(a, b, referenceDate),
-          month: b,
-          day: a,
-          precision: 'day' as const,
-        }
-      : null;
-
-  // First component out of month range: it cannot be a month, so this is `DD/MM`.
-  if (a > 12) {
-    return asDayMonth === null ? null : { ...asDayMonth, ambiguous: false };
-  }
-
-  // Second component out of month range: it cannot be a month either, so this is `MM/YY`.
-  if (b > 12) {
-    return asMonthYear === null ? null : { ...asMonthYear, ambiguous: false };
-  }
-
-  // Both plausible as a month. Prefer whichever reading lands inside the sanity window; when both
-  // do, `MM/YY` wins because it is the format the specification actually lists.
-  const monthYearSane =
-    asMonthYear !== null &&
-    withinSanityWindow(toUtcDate(asMonthYear.year, asMonthYear.month, 1), referenceDate);
-  const dayMonthSane =
-    asDayMonth !== null &&
-    withinSanityWindow(toUtcDate(asDayMonth.year, asDayMonth.month, asDayMonth.day), referenceDate);
-
-  if (monthYearSane && asMonthYear !== null) {
-    return { ...asMonthYear, ambiguous: true };
-  }
-  if (dayMonthSane && asDayMonth !== null) {
-    return { ...asDayMonth, ambiguous: true };
-  }
-  if (asMonthYear !== null) {
-    return { ...asMonthYear, ambiguous: true };
-  }
-  return asDayMonth === null ? null : { ...asDayMonth, ambiguous: true };
+  // A four-digit second component is already a year; a two-digit one needs its century - ADR-16.
+  return {
+    year: second.length === 4 ? year : resolveTwoDigitYear(year, referenceDate),
+    month,
+    day: null,
+    precision: 'month',
+    ambiguous: false,
+  };
 }
 
 /**
