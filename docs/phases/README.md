@@ -72,7 +72,7 @@ four once the remaining engines exist, so it blocks 07 rather than following it.
 | [05](05-capture-mlkit.md) | Expiry capture, on-device OCR, date parser | complete | Capture, two variants, parser tests |
 | [06](06-library.md) | Image library | complete | Grid, filters, additive re-runs |
 | [06b](06b-parser-and-timing-fixes.md) | Parser and timing corrections | complete | Recorded-block fixtures, re-runs, method totals that reconcile |
-| [07](07-ocr-sidecar.md) | Self-hosted OCR sidecar | stage A complete; stage B awaiting on-box verification | **Two stops:** spike report, then build-out |
+| [07](07-ocr-sidecar.md) | Self-hosted OCR sidecar | complete | **Two stops:** spike report, then build-out |
 | [08](08-gcv.md) | Google Cloud Vision engine | not started | GCV over existing library images |
 | [09](09-vlm.md) | VLM engine | not started | Model answer vs parser answer, provider swap |
 | [10](10-history.md) | History and JSON export | not started | The POC's actual deliverable |
@@ -107,8 +107,14 @@ answered 200 throughout. Scored with the shared parser, the deployed path reprod
 exactly: **7 of 10**, the same seven images, the same dates, every one by `sole-candidate`, the same
 three dot-matrix misses.
 
-**Criterion 16 is the one still open**: it needs the app on a handset, and no attempt row has been
-produced from a device yet. The button is enabled and wired.
+**Criterion 16 closed the same day**, on an SM-S928B (Android 16) against the deployed box: three
+`onnx-paddleocr` attempts, no errors, every one parsing by `sole-candidate` — two Library re-runs and
+one fresh capture, which is how `uploadMs 438.6` appears on exactly one of the three. The segment
+nesting is what the run was for: `engineMs` 1836.4 inside `serverTotalMs` 1848.4 inside the phone's
+`requestMs` 2106.0, with `engineMsScope: "inference+network"` and `costEstimateUsd: 0` on all three.
+**`downloadMs` is `null` on every row, including the re-runs** — unlike ML Kit, this engine needs no
+pixels on the handset, so the segment did not happen and is not recorded as `0`. One row reads
+`2026-03-31 · expired`, which is the correct verdict on a March date in August and not a failure.
 
 Stage B also turned up a limit the spike did not reach, now in the README: peak resident memory is
 615 MiB on the 1200×1600 upload variant but **929 MiB on a 6000×4500 original**, against a 1 GiB

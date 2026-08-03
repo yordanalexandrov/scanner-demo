@@ -20,9 +20,7 @@ comparability wins.
 
 ## Status
 
-**Phases 01 to 06 of 10 are complete. Phase 07 is built and verified off the deployment box; its
-acceptance run on the box itself is outstanding**, so it is not counted as complete here — see
-[`docs/phases/README.md`](docs/phases/README.md) for exactly which criteria are still open. Every
+**Phases 01 to 07 of 10 are complete; phase 08 is next.** Every
 record the harness stores is defined once in `packages/shared`. The server is deployed at
 `scanner.yo-po.eu`, stores, serves and thumbnails images, and records barcode decode latencies. The
 Android app builds as an Expo development build, navigates its screens, scans EAN-13 with the decode
