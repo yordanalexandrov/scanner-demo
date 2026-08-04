@@ -132,6 +132,14 @@ engine string — the engine string is the price-table key, and overloading it w
 10. Changing the prompt bumps `promptVersion`, and attempts recorded before and after are distinguishable
     in the export without consulting the git history.
 
+## Measured
+
+[09-vlm-models.md](../spikes/09-vlm-models.md) — three models and three prompt versions against 15
+distinct products with operator-supplied ground truth. It settles the `VLM_MODEL` default on
+`gpt-5.4-mini`, and records two findings the phase document only anticipated: the sidecar reads a
+rotated dot-matrix stamp that two of the three VLMs cannot, and the VLM is the only method that picks
+the expiry date correctly when a production date is printed beside it.
+
 ## Risks / unknowns
 
 - The model may return a confident date it did not actually read. Recording both its answer and the raw

@@ -13,6 +13,7 @@ import {
   imageListQuerySchema,
   ocrResponseSchema,
   parseExpiryDate,
+  startTimer,
   vlmOcrResponseSchema,
 } from '@scanner-demo/shared';
 import type {
@@ -575,8 +576,14 @@ describe('self-hosted OCR', () => {
   it('reports serverTotalMs as the handler, which is longer than the call - criterion 12', async () => {
     const { imageId } = await upload(await testImage(1200, 1600));
     const stub = stubEngine(async () => {
+      // **The engine reports what it measured, not the delay it asked for.** Returning the literal
+      // `20` here made this test flaky at about 2 in 100: `setTimeout(20)` elapses in slightly under
+      // 20 ms on the monotonic clock often enough to matter, and the assertion below then compared a
+      // real measurement against a number nothing had measured. Timing the sleep the way a real
+      // adapter times its call is what makes the containment property below true by construction.
+      const stopEngineTimer = startTimer();
       await new Promise((resolve) => setTimeout(resolve, 20));
-      return ocrResponse({ engineMs: 20 });
+      return ocrResponse({ engineMs: stopEngineTimer() });
     });
     const instance = await withEngine(stub.engine);
 

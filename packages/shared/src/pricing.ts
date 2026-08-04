@@ -113,6 +113,25 @@ export const pricing: Readonly<Record<string, PriceEntry>> = {
     notes:
       'As above. Priced so a model change is a comparison rather than a gap in the cost column.',
   },
+  'vlm:openai/gpt-5.6-terra': {
+    unit: 'per-1M-tokens',
+    usd: null,
+    inputUsd: 2,
+    outputUsd: 12,
+    source: 'https://developers.openai.com/api/docs/pricing',
+    retrieved: '2026-08-03',
+    notes: 'As above.',
+  },
+  'vlm:openai/gpt-5.6-luna': {
+    unit: 'per-1M-tokens',
+    usd: null,
+    inputUsd: 0.2,
+    outputUsd: 1.2,
+    source: 'https://developers.openai.com/api/docs/pricing',
+    retrieved: '2026-08-03',
+    notes:
+      'As above. The cached-input rate of $0.02/1M is ignored: nothing here reuses a prompt prefix across images.',
+  },
 };
 
 /** `undefined` when the engine has no entry at all, which is a different thing from an unknown price. */

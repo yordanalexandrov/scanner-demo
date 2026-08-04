@@ -27,8 +27,14 @@ import { z } from 'zod';
  *   answering `null` on two runs and `2021-10-24` on a third **from the same transcription**. That
  *   is the prompt being ambiguous, not the model interpreting: ADR-16 settled the question for the
  *   parser and v1 simply failed to say it here.
+ * - `prompt-v3` - stops inviting the model to guess. v2 said "write your best reading of an unclear
+ *   character", which is an instruction to fabricate: `gpt-5.6-luna` returned `EXP:` and `MFG:`
+ *   where the packaging prints a bare `24/07`, and `gpt-5.6-terra` returned `ÜRETİM SAATİ` for a
+ *   lot code. v3 asks for `?` in place of an unreadable character and names label invention
+ *   explicitly. All three models already emit `?` unprompted when left to themselves, so this asks
+ *   for something they do rather than something they must learn.
  */
-export const PROMPT_VERSION = 'prompt-v2';
+export const PROMPT_VERSION = 'prompt-v3';
 
 /**
  * Three conventions in here exist to make the model's answer **comparable with the shared parser's
@@ -65,8 +71,11 @@ Return two separate things.
 
 1. Every piece of printed text you can make out in the image, as separate lines, in reading order
    and verbatim. Include text that has nothing to do with dates. Do not correct spelling, do not
-   translate, do not reformat dates, do not add text that is not printed. If a character is unclear,
-   write your best reading of it rather than omitting the line.
+   translate, do not reformat dates.
+   - Transcribe only characters that are physically printed. Do not add a label such as EXP, MFG,
+     BEST BEFORE, LOT or a date prefix unless those exact characters appear on the packaging.
+   - If a character is unclear, write ? in its place. Do not guess which character it is and do not
+     drop the line: 61?3?F004 is a useful reading and an invented one is not.
 
 2. The expiry date printed on the packaging, following these rules exactly:
    - Use the expiry, best-before or use-by date. If a production or packaging date is also printed,
