@@ -30,13 +30,14 @@ locally. Nothing was deployed to the box and nothing on it was modified.
 
 ## The datasets
 
-**A — local, 16 images.** Two or three distinct packages: one carton with a dot-matrix stamp reading
-`24/10/27`, photographed three times as six upload/original rows, and pharmacy boxes. The models
-report two different printed dates for the boxes (`Годен до: 07/2027` with lot `62H24`, and
-`Годен до: 03/2026` with lot `49C23`) consistently across every model and run, which suggests two
-boxes rather than one; the operator recalls two packages in total. **The ambiguity is left standing
-rather than resolved by assumption** — it does not affect the conclusion, because the stamp is where
-every model's score is decided and its ground truth is certain.
+**A — local, 16 images, three physical packages.** One carton with a dot-matrix stamp reading
+`24/10/27`, photographed three times as six upload/original rows; and two boxes of the same pharmacy
+product from different lots — `Парт.№ 62H24 · Годен до: 07/2027` and `Парт.№ 49C23 · Годен до:
+03/2026`. Ground truth confirmed by the operator.
+
+Sixteen images across three packages is why this dataset settles little: 30 of the 48 runs are the
+printed pharmacy label, which every model reads perfectly, so the entire ranking rests on the 18 runs
+against the stamp. Dataset B exists because of that.
 
 **B — production, 15 distinct products, upload variants only.** The newest 15 capture groups on
 `hez.yo-po.eu`, photographed in one session. Ground truth was supplied by the operator per package.
@@ -102,7 +103,21 @@ pair in either dataset and worth keeping deliberately.
 models returned `null` on all three runs. Under `prompt-v2` `gpt-5.4-mini` fabricated dates in this
 situation; the "never guess" rule now holds.
 
-**5. Model/parser agreement measures self-consistency, not accuracy.** Before ground truth existed,
+**5. Hallucination lands on the text the model expects, not on the text it is reading.** On dataset A
+the two pharmacy boxes were read with their lot numbers and printed dates **identically by all three
+models on every run** — `Парт.№ 62H24 · Годен до: 07/2027` and `Парт.№ 49C23 · Годен до: 03/2026`,
+both later confirmed correct. The *brand names* on the very same images were not: one image came back
+as `АНАЛГИН`, `LACTOFLOR` and `BALOFITAL` from the three models, and `PARACOFDAL`, `Spirulina` and
+`ЦИТРАМОН П` appear across runs of others. None of those is a reading; they are guesses at what a
+Bulgarian pharmacy box usually says.
+
+This is worth knowing because it is the opposite of the intuition that a model is more reliable on
+familiar words. The arbitrary alphanumeric strings — the thing this harness actually extracts — are
+where it stays honest, and the semantically predictable text is where it fabricates. It also means the
+`rawText` column should not be read as a transcription of the whole package: it is trustworthy exactly
+where it matters and decorative elsewhere.
+
+**6. Model/parser agreement measures self-consistency, not accuracy.** Before ground truth existed,
 `terra` scored 48/48 on "the model's answer equals the shared parser's answer over the same raw text"
 on dataset A. Its actual accuracy on that dataset is 9/18 on the stamp. A model that guesses a
 character produces a clean string, the parser accepts it, the two columns agree, and a fabricated
