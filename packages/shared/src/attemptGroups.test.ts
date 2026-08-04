@@ -105,6 +105,92 @@ describe('groupAttempts', () => {
     expect(groups[0]?.cohorts[0]?.failureCount).toBe(1);
   });
 
+  it('never averages two engines of one method into one median - ADR-24', () => {
+    // The case this was written for: `VLM_MODEL` selects the model, every model records
+    // `method: "vlm"`, and the two were observed on 2026-08-04 at 2.2 s and 8.6 s against the same
+    // image. One median over both is a number true of neither - the same failure ADR-2 describes
+    // for the two image variants, one level down.
+    const withEngine = (engine: string, engineMs: number, promptVersion: string): Attempt =>
+      attempt({
+        method: 'vlm',
+        promptVersion,
+        ocr: {
+          engine,
+          rawText: '30.06.25',
+          blocks: [],
+          engineMs,
+          engineMsScope: 'inference+network',
+          serverTotalMs: null,
+          imageWidth: 1200,
+          imageHeight: 1600,
+          usage: null,
+          costEstimateUsd: null,
+          pricingVersion: 'unset',
+        },
+        timing: { ...attempt().timing, engineMs, totalMs: engineMs + 100 },
+      });
+
+    const groups = groupAttempts([
+      withEngine('vlm:openai/gpt-5.4-mini', 2200, 'prompt-v3'),
+      withEngine('vlm:openai/gpt-5.4-mini', 2300, 'prompt-v3'),
+      withEngine('vlm:openai/gpt-5.6-terra', 8600, 'prompt-v3'),
+    ]);
+
+    // Still one visual group - the reader compares methods, and both models are the VLM method.
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.attempts).toHaveLength(3);
+
+    const byEngine = new Map(groups[0]?.cohorts.map((c) => [c.engine, c]));
+    expect([...byEngine.keys()].sort()).toEqual([
+      'vlm:openai/gpt-5.4-mini',
+      'vlm:openai/gpt-5.6-terra',
+    ]);
+    expect(byEngine.get('vlm:openai/gpt-5.4-mini')?.medianEngineMs).toBe(2250);
+    expect(byEngine.get('vlm:openai/gpt-5.6-terra')?.medianEngineMs).toBe(8600);
+    // The number the old key produced, and the one no cohort may report.
+    expect(groups[0]?.cohorts.map((c) => c.medianEngineMs)).not.toContain(2300);
+
+    // A prompt change splits them for the same reason a model change does - ADR-24.
+    const twoPrompts = groupAttempts([
+      withEngine('vlm:openai/gpt-5.4-mini', 2200, 'prompt-v2'),
+      withEngine('vlm:openai/gpt-5.4-mini', 2300, 'prompt-v3'),
+    ]);
+    expect(twoPrompts[0]?.cohorts.map((c) => c.promptVersion).sort()).toEqual([
+      'prompt-v2',
+      'prompt-v3',
+    ]);
+  });
+
+  it('keeps a failed run in its own cohort, because it has no engine to attribute - ADR-24', () => {
+    const ok = attempt({
+      method: 'gcv',
+      ocr: {
+        engine: 'gcv:builtin/stable',
+        rawText: '',
+        blocks: [],
+        engineMs: 400,
+        engineMsScope: 'inference+network',
+        serverTotalMs: null,
+        imageWidth: 1200,
+        imageHeight: 1600,
+        usage: null,
+        costEstimateUsd: 0.0015,
+        pricingVersion: '2026-08-03',
+      },
+      timing: { ...attempt().timing, engineMs: 400, totalMs: 500 },
+    });
+    // `ocr` is `null` on a failure, so the record genuinely does not know which engine it would
+    // have been. Filing it under the successful one would attribute a failure to an engine that
+    // may not have produced it.
+    const failed = attempt({ method: 'gcv', error: 'Cloud Vision refused the call' });
+
+    const cohorts = groupAttempts([ok, failed])[0]?.cohorts ?? [];
+
+    expect(cohorts).toHaveLength(2);
+    expect(cohorts.find((c) => c.engine === 'gcv:builtin/stable')?.failureCount).toBe(0);
+    expect(cohorts.find((c) => c.engine === null)?.failureCount).toBe(1);
+  });
+
   it('counts an expired date as an extraction - ADR-7', () => {
     const groups = groupAttempts([
       attempt({ parse: parsed('valid') }),

@@ -25,6 +25,23 @@ import type { TimingVersion } from './timingVersion.js';
 export interface AttemptSummaryCohort {
   parserVersion: ParserVersion;
   timingVersion: TimingVersion;
+  /**
+   * The engine string these runs came from - `"mlkit"`, `"gcv:builtin/stable"`,
+   * `"vlm:openai/gpt-5.4-mini"` - or `null` for runs that produced no result at all.
+   *
+   * **It is part of the cohort key because one `method` can be several engines.** The VLM path is
+   * where this stops being theoretical: `VLM_MODEL` selects the model, every model records
+   * `method: "vlm"`, and without this a median would average a 2.2 s run of one model together with
+   * an 8.6 s run of another and report a number true of neither. That is the same failure ADR-2
+   * describes for the two image variants, one level down.
+   *
+   * `null` is a cohort of its own, and deliberately: a failed run has `ocr: null`, so the record
+   * genuinely does not know which engine it would have been. Filing it under one of the others
+   * would attribute a failure to a model that may not have produced it.
+   */
+  engine: string | null;
+  /** The prompt that produced them. VLM only; `null` on every other method - ADR-24. */
+  promptVersion: string | null;
   /** The runs behind these figures, in the order supplied by the API. */
   attempts: Attempt[];
   /**
@@ -53,9 +70,10 @@ export interface AttemptGroup {
   /** Every individual run, in the order it was given - the API serves attempts newest first. */
   attempts: Attempt[];
   /**
-   * Extraction and latency summaries cannot cross parser or timing semantics. Keeping these
-   * cohorts inside the visual `(method, inputVariant)` group preserves ADR-2 without fabricating a
-   * median across the phase 06b boundary - ADR-21, ADR-22.
+   * Extraction and latency summaries cannot cross parser semantics, timing semantics, the engine
+   * that produced them, or the prompt that produced them. Keeping these cohorts inside the visual
+   * `(method, inputVariant)` group preserves ADR-2 without fabricating a median across the phase
+   * 06b boundary - ADR-21, ADR-22 - or across two models of one method - ADR-24.
    */
   cohorts: AttemptSummaryCohort[];
 }
@@ -74,7 +92,16 @@ function summariseCohorts(attempts: Attempt[]): AttemptSummaryCohort[] {
   const buckets = new Map<string, Attempt[]>();
 
   for (const attempt of attempts) {
-    const key = `${attempt.parserVersion}\u0000${attempt.timingVersion}`;
+    // `JSON.stringify` rather than a separator, unlike the group key below: `engine` is a free
+    // string a provider chose rather than an enum member, so nothing here can promise it does not
+    // contain whichever separator was picked - and `null` has to stay distinct from `""`, which a
+    // joined string cannot manage.
+    const key = JSON.stringify([
+      attempt.parserVersion,
+      attempt.timingVersion,
+      attempt.ocr?.engine ?? null,
+      attempt.promptVersion,
+    ]);
     const bucket = buckets.get(key);
     if (bucket === undefined) {
       buckets.set(key, [attempt]);
@@ -93,6 +120,9 @@ function summariseCohorts(attempts: Attempt[]): AttemptSummaryCohort[] {
       {
         parserVersion: first.parserVersion,
         timingVersion: first.timingVersion,
+        // Every attempt in a bucket shares these four by construction.
+        engine: first.ocr?.engine ?? null,
+        promptVersion: first.promptVersion,
         attempts: bucket,
         medianTotalMs: median(bucket.map((attempt) => attempt.timing.totalMs)),
         medianEngineMs: median(
