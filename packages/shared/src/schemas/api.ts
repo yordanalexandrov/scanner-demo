@@ -1,7 +1,9 @@
 import { z } from 'zod';
-import { attemptSchema } from './attempt.js';
+import { attemptSchema, methodSchema } from './attempt.js';
 import { barcodeScanSchema } from './barcode.js';
 import { imageRecordSchema, imageSourceSchema, imageVariantSchema } from './image.js';
+import { parserVersionSchema } from '../parserVersion.js';
+import { timingVersionSchema } from '../timingVersion.js';
 
 /**
  * Request and response contracts for the HTTP API.
@@ -198,6 +200,71 @@ export const attemptListResponseSchema = z.object({
 });
 
 export type AttemptListResponse = z.infer<typeof attemptListResponseSchema>;
+
+/**
+ * A page of attempts is smaller than a page of images on purpose.
+ *
+ * An `Attempt` carries the engine's whole `rawText` and every candidate the parser considered, so a
+ * row here is kilobytes where an `ImageRecord` is bytes. History pages through this and the JSON
+ * export pages through it to exhaustion; 200 rows of raw text over a phone's uplink is already the
+ * upper end of what is worth one round trip.
+ */
+export const ATTEMPT_LIST_DEFAULT_LIMIT = 100;
+export const ATTEMPT_LIST_MAX_LIMIT = 200;
+
+/**
+ * Everything History can narrow the benchmark set by - phase 10 scope items 2 to 4.
+ *
+ * **`source` and `inputVariant` are two different questions and are deliberately spelled
+ * differently from the Library's image `variant`.** `source` is a property of the photograph -
+ * camera or gallery - and gates every capture-latency figure, because a gallery import has no
+ * capture conditions that were ours to set. `inputVariant` is a property of the *run*: which
+ * pixels the method read, which is what keeps the on-device path's `original` and `upload` results
+ * apart - ADR-2. One filter used where the other was meant would silently merge two populations
+ * into one average, which is the specific failure this screen exists to avoid.
+ *
+ * `from`/`to` are unix ms over `createdAt` - **when the run happened**, not when the photograph was
+ * taken. That differs from the image listing on purpose: there, a date filter means "photos I shot
+ * today"; here it means "runs from this session", which is the interval an operator wants to
+ * isolate after changing a model or a prompt. `createdAt` is also the field the cursor orders on,
+ * so the two agree.
+ *
+ * **Strict, so an unknown parameter is a 400 rather than a stripped one.** A server older than the
+ * app would otherwise answer a new filter with a full unfiltered page and the screen would look
+ * like it was filtering - verified against the image listing on 2026-07-30. A filter that lies is
+ * worse than one that fails.
+ */
+export const attemptListQuerySchema = z.strictObject({
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(ATTEMPT_LIST_MAX_LIMIT)
+    .default(ATTEMPT_LIST_DEFAULT_LIMIT),
+  cursor: z.string().min(1).optional(),
+  method: methodSchema.optional(),
+  /** The photograph's origin, read from the image the attempt was recorded against. */
+  source: imageSourceSchema.optional(),
+  /** Which pixels the run read - ADR-2. Never conflated with the image listing's `variant`. */
+  inputVariant: imageVariantSchema.optional(),
+  /** Extraction semantics - ADR-21. An accuracy figure spanning two of these means nothing. */
+  parserVersion: parserVersionSchema.optional(),
+  /** `totalMs` start-point semantics - ADR-22. No latency median may span two of these. */
+  timingVersion: timingVersionSchema.optional(),
+  from: z.coerce.number().int().optional(),
+  to: z.coerce.number().int().optional(),
+});
+
+export type AttemptListQuery = z.infer<typeof attemptListQuerySchema>;
+
+/** Newest first, keyset-paginated on `createdAt` - the same scheme the other two listings use. */
+export const attemptPageResponseSchema = z.object({
+  items: z.array(attemptSchema),
+  /** `null` on the last page. Opaque to the client - decode it nowhere but the server. */
+  nextCursor: z.string().nullable(),
+});
+
+export type AttemptPageResponse = z.infer<typeof attemptPageResponseSchema>;
 
 /** The only unauthenticated response in the API. `uptimeMs` is monotonic, not a clock difference. */
 export const healthResponseSchema = z.object({

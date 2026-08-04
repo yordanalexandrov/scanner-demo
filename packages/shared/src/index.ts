@@ -21,6 +21,7 @@ export * from './dateParser.js';
 export * from './timing.js';
 export * from './stats.js';
 export * from './attemptGroups.js';
+export * from './benchmarkExport.js';
 export * from './pricing.js';
 export * from './parserVersion.js';
 export * from './timingVersion.js';

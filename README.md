@@ -20,19 +20,22 @@ comparability wins.
 
 ## Status
 
-**Phases 01 to 08 of 10 are complete; phase 09 is next.** Phase 08 ran against the real Cloud Vision
-API from the deployment box on 2026-08-03, and from an SM-S928B against it the same day. Every
-record the harness stores is defined once in `packages/shared`. The server is deployed at
-`scanner.yo-po.eu`, stores, serves and thumbnails images, and records barcode decode latencies. The
-Android app builds as an Expo development build, navigates its screens, scans EAN-13 with the decode
-latency measured on the phone's monotonic clock, and photographs an expiry date, stores it in two
-variants, reads both with on-device ML Kit and extracts the date with the one shared parser. The image
-library browses everything the server holds and re-runs any method over any stored image, which is what
-makes the remaining engine cheap to add: it is measured against packaging already collected.
-**Three of the four methods are now wired**: on-device ML Kit, the self-hosted RapidOCR sidecar and
-Google Cloud Vision, all three returning the same `OcrResponse` and parsed by the same code, and all
-three carrying measured figures below.
-See [`docs/phases/README.md`](docs/phases/README.md) for the build order and where the work stands.
+**All ten phases are implemented.** Every record the harness stores is defined once in
+`packages/shared`. The server is deployed at `scanner.yo-po.eu`, stores, serves and thumbnails images,
+and records barcode decode latencies. The Android app builds as an Expo development build, navigates
+its screens, scans EAN-13 with the decode latency measured on the phone's monotonic clock, and
+photographs an expiry date, stores it in two variants, reads both with on-device ML Kit and extracts
+the date with the one shared parser. The image library browses everything the server holds and re-runs
+any method over any stored image, so an engine is measured against packaging already collected rather
+than re-shot for it.
+
+**All four methods are wired** — on-device ML Kit, the self-hosted RapidOCR sidecar, Google Cloud
+Vision and a VLM behind a swappable provider interface — all returning the same `OcrResponse` and
+parsed by the same code. History puts them side by side per source image, with a per-method summary and
+a JSON export of the full rows behind it.
+
+Read [How to read these numbers](#how-to-read-these-numbers) before drawing a conclusion from any
+figure here. See [`docs/phases/README.md`](docs/phases/README.md) for the build order.
 
 ## The self-hosted engine
 
@@ -224,6 +227,109 @@ capture, each landing on its text, including the rotated and inverted labels aro
 graphic, whose axis-aligned boxes are correspondingly larger than the glyphs they contain. Vision's
 reported page size matched the stored file exactly, so the EXIF-rotation case the adapter guards
 against did not arise on this image.
+
+## How to read these numbers
+
+The History screen and the JSON export are where the four methods finally sit side by side. Everything
+below is a caveat that **actually applies to these figures**, not a general disclaimer. A reader who
+skips it will draw conclusions the data does not support.
+
+**`engineMs` is not one quantity across the four methods.** Every response declares
+`engineMsScope`, and the export carries it on every row, because the figure means different things:
+
+| Method | `engineMsScope` | What is inside the number |
+|---|---|---|
+| ML Kit, on-device | `inference` | Recognition only. No transport of any kind. |
+| Self-hosted sidecar | `inference+network` | The whole HTTP call to a container on the same host. The process boundary is inside it and cannot be separated out. |
+| Cloud Vision | `inference+network` | The whole call, **including the round trip from Hetzner to Google**. |
+| VLM | `inference+network` | The whole call, including the round trip to OpenAI. |
+
+Placing the sidecar's bar next to Cloud Vision's compares a container on the same machine against a
+transatlantic request. Placing either next to ML Kit's compares a network-inclusive figure against one
+that excludes transport entirely. Both comparisons are legitimate — they are what a deployment would
+actually pay — but only if the scope is shown ([ADR-10](docs/decisions.md)).
+
+**Gallery imports have no capture latency, and `null` is not `0`.** A gallery image was not shot under
+conditions this harness set: there is no `captureMs`, and `downscaleMs`/`uploadMs` describe an import
+rather than a capture. History therefore **refuses to show a capture-cost figure until `source` is
+filtered to Camera or Gallery**, and says so instead of averaging the two. Any figure computed from the
+export has to do the same. Every absent measurement in the export is `null`, never `0`, for exactly
+this reason: a zero would enter an average and drag it.
+
+**Capture cost sits outside every method total.** `totalMs` starts at the method invocation, not at the
+shutter ([ADR-22](docs/decisions.md)). The capture is paid once per photograph and read by all four
+methods, so charging it to each of them would make the only local method look like the slowest. Its
+segments are stored and reported beside the total, never summed into it.
+
+**A median below about five runs is not a distribution.** History prints the run count next to every
+median and flags cohorts under five. Medians rather than means throughout: a thermally throttled decode
+or a single retry is a long tail on one side, and a mean reports that tail as the typical case.
+
+**Cold start is reported separately, and one engine has no warm-up at all.** The sidecar is warmed with
+a dummy inference when the *server* boots, so no real measurement pays the model load — but restarting
+the sidecar alone bypasses that, and nothing detects it. Cloud Vision pays an OAuth fetch and a TLS
+handshake on the first call of a process, about seven times its warm median, and nothing warms it. **The
+first Vision measurement after every deploy is not a measurement.**
+
+**The server figures come from a two-core box shared with a live application.** Absolute latencies from
+this harness are not portable to other hardware. What stays valid is the comparison between the four
+methods, since all four were measured under the same conditions — with one asymmetry that has to be
+named: **local contention affects the self-hosted sidecar and not the cloud engines, which slightly
+flatters GCV and the VLM against it** ([ADR-18](docs/decisions.md),
+[`docs/deployment-target.md`](docs/deployment-target.md)).
+
+**No median may span a `timingVersion`, a `parserVersion`, an engine or a prompt.** These are four
+independent axes and each one changes what a number means:
+
+- `timingVersion` — where `totalMs` starts. `shutter-v1` rows include the operator staring at the
+  screen; `method-v2` rows do not ([ADR-22](docs/decisions.md)).
+- `parserVersion` — the extraction rules. An accuracy figure is a statement about an engine *and* a
+  parser together ([ADR-21](docs/decisions.md), [ADR-23](docs/decisions.md)).
+- The engine string, which carries the model. One `method` can be several models, and the VLM's differ
+  by more than 4× in latency ([ADR-24](docs/decisions.md)).
+- `promptVersion`, on the VLM, which changes results the way a model change does.
+
+History splits into labelled cohorts on all four rather than combining them, and the export carries all
+four on every row so the same split is reproducible outside the app.
+
+**Extraction rate counts an expired date as a success.** The engine read the date correctly and the
+product is old; scoring that as a failure would penalise whichever engine reads best on a dataset shot
+from real packaging ([ADR-7](docs/decisions.md)). It is also **not** an accuracy rate: it counts dates
+extracted, not dates extracted *correctly*. On the ten images all three methods had run in phase 08, one
+of ML Kit's six extractions was wrong. Scoring correctness needs a hand-made key against the export.
+
+**Costs ignore free tiers, and an unknown cost is `unpriced`, never `$0.00`.** The estimate answers "what
+would this cost at scale", which is the decision this benchmark informs, so the billing console will read
+$0.00 at benchmark volumes while the cost column does not. A price the table has no figure for shows as
+unpriced and is counted separately rather than folded in as free ([ADR-11](docs/decisions.md)).
+
+**There is no leaderboard, on screen or here.** The caveats above are not comparable enough for a single
+ranking to be honest. The figures are reported with their conditions and the reader draws the conclusion.
+
+### The JSON export
+
+History's export button writes the **full rows** for the current filters — raw OCR text verbatim, every
+candidate the parser considered and why it was rejected, `engineMsScope`, `referenceDate`, and the
+pricing, parser and timing versions on every row. A summary can be recomputed from the rows; the rows
+cannot be recovered from a summary. Barcode scans travel in their own `barcodeScans` array and never in
+`attempts` ([ADR-1](docs/decisions.md)); they are always the whole recorded set, because none of the
+attempt filters applies to them.
+
+The export always writes a copy inside the app's own storage and offers to copy it to a folder of your
+choosing through Android's Storage Access Framework. Both are optional to use and neither needs a
+rebuilt development client.
+
+Re-validate a file and recompute its headline figures from it:
+
+```bash
+pnpm --filter @scanner-demo/server verify:export ~/Downloads/scanner-demo-2026-08-04T09-12-33.json
+```
+
+That parses the file against the shared zod schemas, checks every row carries the fields that make it
+interpretable later, checks the barcode separation, and prints the median latency per method, variant
+and semantics. **It computes each median twice** — once through the shared `groupAttempts` the screen
+calls, once through a longhand implementation that owes it nothing — and fails on a disagreement.
+Running only the first would prove that the shared function agrees with itself.
 
 ## Layout
 

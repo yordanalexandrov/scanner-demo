@@ -15,12 +15,51 @@
 
 import { median } from './stats.js';
 import { methodSchema } from './schemas/attempt.js';
-import type { Attempt, Method } from './schemas/attempt.js';
+import type { Attempt, Method, Timing } from './schemas/attempt.js';
 import { imageVariantSchema } from './schemas/image.js';
 import type { ImageVariant } from './schemas/image.js';
 import type { Millis } from './timing.js';
 import type { ParserVersion } from './parserVersion.js';
 import type { TimingVersion } from './timingVersion.js';
+
+/**
+ * The shared cost of getting one capture onto the server, outside every method total - ADR-22.
+ *
+ * It is paid once per photograph and belongs to none of the four methods, so it is reported beside
+ * a method total and never summed into one. `null` rather than `0` when no capture-side segment
+ * applies at all - a Library re-run has neither a capture nor an upload, and a zero there would
+ * read as a free capture and drag every average built on it.
+ */
+export function captureCostMs(timing: Timing): Millis | null {
+  const segments = [timing.captureMs, timing.downscaleMs, timing.uploadMs].filter(
+    (value): value is Millis => value !== null,
+  );
+
+  return segments.length === 0 ? null : segments.reduce((total, value) => total + value, 0);
+}
+
+/**
+ * What a set of runs is estimated to have cost, and how many of them nobody can price.
+ *
+ * The two travel together because a total on its own would lie by omission: a `null`
+ * `costEstimateUsd` means the price table has no figure for that engine, or the run failed before
+ * producing one, and treating either as `0` makes an unpriced method indistinguishable from a free
+ * one - ADR-11. So the sum covers only the runs that reported a cost, and the count says how many
+ * it does not cover.
+ */
+function priceRuns(attempts: readonly Attempt[]): {
+  costUsd: number | null;
+  unpricedCount: number;
+} {
+  const priced = attempts
+    .map((attempt) => attempt.ocr?.costEstimateUsd ?? null)
+    .filter((value): value is number => value !== null);
+
+  return {
+    costUsd: priced.length === 0 ? null : priced.reduce((total, value) => total + value, 0),
+    unpricedCount: attempts.length - priced.length,
+  };
+}
 
 export interface AttemptSummaryCohort {
   parserVersion: ParserVersion;
@@ -62,6 +101,10 @@ export interface AttemptSummaryCohort {
   failureCount: number;
   /** Runs that extracted a date, counting `expired` as a successful extraction - ADR-7. */
   extractedCount: number;
+  /** Estimated cost of these runs, over the ones that reported one. `null` when none did - ADR-11. */
+  costUsd: number | null;
+  /** Runs with no cost figure. Never folded into `costUsd` as `0` - ADR-11. */
+  unpricedCount: number;
 }
 
 export interface AttemptGroup {
@@ -76,6 +119,37 @@ export interface AttemptGroup {
    * 06b boundary - ADR-21, ADR-22 - or across two models of one method - ADR-24.
    */
   cohorts: AttemptSummaryCohort[];
+  /**
+   * What every run in the group is estimated to have cost.
+   *
+   * **Cost may be totalled across cohorts where a median may not**, and the difference is not an
+   * inconsistency. A median is a statement about a population, so mixing two timing protocols
+   * produces a figure true of neither. A cost is an amount actually incurred per call, priced by
+   * the table version stored on that call; adding two of them answers "what did this cost", which
+   * is a question the parser and timing semantics do not enter into.
+   */
+  costUsd: number | null;
+  unpricedCount: number;
+}
+
+/**
+ * Every attempt recorded against one source image, with the per-method groups underneath it.
+ *
+ * This is History's row - phase 10 scope item 1 - and it is grouped by `imageId` rather than by
+ * `captureGroupId` because the attempt row itself names the image it was recorded against. Under
+ * ADR-20 that is the group's uploaded row whichever variant's pixels were read, so the two
+ * groupings coincide in the data while only this one is derivable from an attempt alone: an export
+ * consumer holding `attempts` and no `images` can still reproduce these rows.
+ */
+export interface ImageAttempts {
+  imageId: string;
+  captureGroupId: string;
+  /** Every run against this image, in the order supplied by the API - newest first. */
+  attempts: Attempt[];
+  /** The same runs, split by `(method, inputVariant)` - the four methods read side by side. */
+  groups: AttemptGroup[];
+  /** The most recent run against this image. Wall clock, ordered only - never subtracted - ADR-10. */
+  latestAt: number;
 }
 
 /** Index of each enum member, so group order is the declared order rather than insertion order. */
@@ -135,6 +209,7 @@ function summariseCohorts(attempts: Attempt[]): AttemptSummaryCohort[] {
         extractedCount: bucket.filter(
           (attempt) => attempt.parse !== null && attempt.parse.expiry !== null,
         ).length,
+        ...priceRuns(bucket),
       },
     ];
   });
@@ -168,8 +243,49 @@ export function groupAttempts(attempts: readonly Attempt[]): AttemptGroup[] {
       inputVariant: first.inputVariant,
       attempts: bucket,
       cohorts: summariseCohorts(bucket),
+      ...priceRuns(bucket),
     });
   }
 
   return groups.sort((left, right) => orderOf(left) - orderOf(right));
+}
+
+/**
+ * The same attempts, one row per source image, newest activity first.
+ *
+ * The ordering is by the most recent run rather than by the image's own `createdAt`: History is
+ * read while a dataset is being collected, and the capture someone just re-ran is the one they want
+ * at the top. `latestAt` is a wall-clock instant used only to order rows - ADR-10.
+ */
+export function groupAttemptsByImage(attempts: readonly Attempt[]): ImageAttempts[] {
+  const buckets = new Map<string, Attempt[]>();
+
+  for (const attempt of attempts) {
+    const bucket = buckets.get(attempt.imageId);
+    if (bucket === undefined) {
+      buckets.set(attempt.imageId, [attempt]);
+    } else {
+      bucket.push(attempt);
+    }
+  }
+
+  const rows: ImageAttempts[] = [];
+
+  for (const bucket of buckets.values()) {
+    const first = bucket[0];
+    if (first === undefined) {
+      continue;
+    }
+
+    rows.push({
+      imageId: first.imageId,
+      // Every attempt in a bucket shares this: they name the same image.
+      captureGroupId: first.captureGroupId,
+      attempts: bucket,
+      groups: groupAttempts(bucket),
+      latestAt: bucket.reduce((latest, attempt) => Math.max(latest, attempt.createdAt), 0),
+    });
+  }
+
+  return rows.sort((left, right) => right.latestAt - left.latestAt);
 }

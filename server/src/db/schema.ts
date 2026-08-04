@@ -177,6 +177,11 @@ export const attempts = sqliteTable(
   },
   (table) => [
     index('attempts_imageId_createdAt_idx').on(table.imageId, table.createdAt),
+    // History's sort order, and the one its `from`/`to` range reads. Keyset pagination walks this
+    // index instead of sorting the table, and the trailing `id` is the cursor's tie-breaker - the
+    // four methods of one re-run-all routinely land in the same millisecond. Without it SQLite
+    // would sort every page of an export that walks the whole table.
+    index('attempts_createdAt_id_idx').on(table.createdAt, table.id),
     // Both of the Library's "has this been run?" filters, which ask about a capture group rather
     // than a single row because attempts hang off the group's uploaded row whichever variant was
     // read - ADR-20. `expiryDate` trails `captureGroupId` so `hasDate` is answered out of the index

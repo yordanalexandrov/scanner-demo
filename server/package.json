@@ -17,7 +17,9 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint --config ../eslint.config.js . --no-error-on-unmatched-pattern",
     "test": "vitest run",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "//verify:export": "Re-validates a JSON export and recomputes its medians from the file - phase 10 criteria 6 to 9.",
+    "verify:export": "tsx scripts/verify-export.ts"
   },
   "dependencies": {
     "@fastify/multipart": "^10.1.0",

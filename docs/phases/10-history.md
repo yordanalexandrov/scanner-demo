@@ -1,6 +1,6 @@
 # Phase 10 — History and JSON export
 
-**Status:** not started · **Depends on:** 05, 06, 06b, 07, 08, 09 · **Source:** spec milestone 10
+**Status:** awaiting review · **Depends on:** 05, 06, 06b, 07, 08, 09 · **Source:** spec milestone 10
 
 ## Goal
 

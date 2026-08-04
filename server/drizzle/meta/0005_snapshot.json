@@ -1,0 +1,436 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "ed762107-1704-4afb-a57d-32ae5280e068",
+  "prevId": "f608420c-c840-4e67-8bdc-f46e45f3974b",
+  "tables": {
+    "attempts": {
+      "name": "attempts",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "imageId": {
+          "name": "imageId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "captureGroupId": {
+          "name": "captureGroupId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "method": {
+          "name": "method",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "inputVariant": {
+          "name": "inputVariant",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "engine": {
+          "name": "engine",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "device": {
+          "name": "device",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "expiryDate": {
+          "name": "expiryDate",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "expiryStatus": {
+          "name": "expiryStatus",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "expiryPrecision": {
+          "name": "expiryPrecision",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "parseRule": {
+          "name": "parseRule",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "totalMs": {
+          "name": "totalMs",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "engineMs": {
+          "name": "engineMs",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "costEstimateUsd": {
+          "name": "costEstimateUsd",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "referenceDate": {
+          "name": "referenceDate",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "parserVersion": {
+          "name": "parserVersion",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "timingVersion": {
+          "name": "timingVersion",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "pricingVersion": {
+          "name": "pricingVersion",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "promptVersion": {
+          "name": "promptVersion",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "error": {
+          "name": "error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "ocrJson": {
+          "name": "ocrJson",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "parseJson": {
+          "name": "parseJson",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "vlmJson": {
+          "name": "vlmJson",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "timingJson": {
+          "name": "timingJson",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "attempts_imageId_createdAt_idx": {
+          "name": "attempts_imageId_createdAt_idx",
+          "columns": ["imageId", "createdAt"],
+          "isUnique": false
+        },
+        "attempts_createdAt_id_idx": {
+          "name": "attempts_createdAt_id_idx",
+          "columns": ["createdAt", "id"],
+          "isUnique": false
+        },
+        "attempts_captureGroupId_expiryDate_idx": {
+          "name": "attempts_captureGroupId_expiryDate_idx",
+          "columns": ["captureGroupId", "expiryDate"],
+          "isUnique": false
+        },
+        "attempts_method_inputVariant_idx": {
+          "name": "attempts_method_inputVariant_idx",
+          "columns": ["method", "inputVariant"],
+          "isUnique": false
+        },
+        "attempts_expiryDate_idx": {
+          "name": "attempts_expiryDate_idx",
+          "columns": ["expiryDate"],
+          "isUnique": false
+        },
+        "attempts_totalMs_idx": {
+          "name": "attempts_totalMs_idx",
+          "columns": ["totalMs"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "attempts_imageId_images_id_fk": {
+          "name": "attempts_imageId_images_id_fk",
+          "tableFrom": "attempts",
+          "tableTo": "images",
+          "columnsFrom": ["imageId"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "barcode_scans": {
+      "name": "barcode_scans",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "value": {
+          "name": "value",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "decodeMs": {
+          "name": "decodeMs",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "device": {
+          "name": "device",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "scannedAt": {
+          "name": "scannedAt",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "barcode_scans_scannedAt_id_idx": {
+          "name": "barcode_scans_scannedAt_id_idx",
+          "columns": ["scannedAt", "id"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "images": {
+      "name": "images",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "captureGroupId": {
+          "name": "captureGroupId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "variant": {
+          "name": "variant",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "width": {
+          "name": "width",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "height": {
+          "name": "height",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "bytes": {
+          "name": "bytes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "mimeType": {
+          "name": "mimeType",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "torch": {
+          "name": "torch",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "captureWidth": {
+          "name": "captureWidth",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "captureHeight": {
+          "name": "captureHeight",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "downscaled": {
+          "name": "downscaled",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "capturedAt": {
+          "name": "capturedAt",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "capturedAtSource": {
+          "name": "capturedAtSource",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "images_createdAt_id_idx": {
+          "name": "images_createdAt_id_idx",
+          "columns": ["createdAt", "id"],
+          "isUnique": false
+        },
+        "images_captureGroupId_idx": {
+          "name": "images_captureGroupId_idx",
+          "columns": ["captureGroupId"],
+          "isUnique": false
+        },
+        "images_capturedAt_idx": {
+          "name": "images_capturedAt_idx",
+          "columns": ["capturedAt"],
+          "isUnique": false
+        },
+        "images_source_createdAt_id_idx": {
+          "name": "images_source_createdAt_id_idx",
+          "columns": ["source", "createdAt", "id"],
+          "isUnique": false
+        },
+        "images_variant_createdAt_id_idx": {
+          "name": "images_variant_createdAt_id_idx",
+          "columns": ["variant", "createdAt", "id"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {}
+  }
+}

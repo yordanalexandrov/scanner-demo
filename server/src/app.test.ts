@@ -7,9 +7,12 @@ import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import sharp from 'sharp';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  LEGACY_PARSER_VERSION,
+  LEGACY_TIMING_VERSION,
   PARSER_VERSION,
   PRICING_VERSION,
   TIMING_VERSION,
+  attemptListQuerySchema,
   imageListQuerySchema,
   ocrResponseSchema,
   parseExpiryDate,
@@ -33,6 +36,7 @@ import type { OcrEngine } from './engines/types.js';
 import { loadEnv } from './env.js';
 import type { Env } from './env.js';
 import type { ListCursor } from './lib/cursor.js';
+import { attemptListQuery } from './lib/attemptQuery.js';
 import { imageListQuery } from './lib/imageQuery.js';
 import { THUMBNAIL_LONG_EDGE_PX } from './lib/thumbnails.js';
 
@@ -195,6 +199,7 @@ describe('authentication', () => {
     ['/api/v1/barcode-scans', 'GET'],
     ['/api/v1/barcode-scans', 'POST'],
     ['/api/v1/attempts', 'POST'],
+    ['/api/v1/attempts', 'GET'],
   ])('refuses %s %s without a token', async (url, method) => {
     const response = await app.inject({ method: method as 'GET' | 'POST', url });
 
@@ -1475,6 +1480,132 @@ describe('library filters', () => {
   });
 });
 
+/**
+ * The listing behind History and the JSON export - phase 10 item 7.
+ *
+ * What these defend is that every filter is answered in SQL and answered honestly. A filter that
+ * silently does nothing is the worst outcome available here: the per-method medians on screen would
+ * be taken over a set the chips say is excluded, and nothing would say so.
+ */
+describe('the attempts listing', () => {
+  function listAll(query = '') {
+    return app.inject({
+      method: 'GET',
+      url: `/api/v1/attempts${query}`,
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
+  }
+
+  async function items(query = ''): Promise<Attempt[]> {
+    const response = await listAll(query);
+    expect(response.statusCode, response.body).toBe(200);
+    return (response.json() as { items: Attempt[] }).items;
+  }
+
+  it('narrows on every filter it advertises, in SQL', async () => {
+    const camera = await upload(await testImage(64, 64), { source: 'camera' });
+    const gallery = await upload(await testImage(64, 64), { source: 'gallery' });
+
+    await postAttempt(camera.imageId, { method: 'mlkit', inputVariant: 'upload' });
+    await postAttempt(camera.imageId, { method: 'mlkit', inputVariant: 'original' });
+    await postAttempt(camera.imageId, { method: 'gcv', parserVersion: LEGACY_PARSER_VERSION });
+    await postAttempt(gallery.imageId, { method: 'vlm', timingVersion: LEGACY_TIMING_VERSION });
+
+    expect(await items()).toHaveLength(4);
+    expect((await items('?method=mlkit')).map((row) => row.inputVariant).sort()).toEqual([
+      'original',
+      'upload',
+    ]);
+    // The two on-device runs stay separable, which is the whole reason `inputVariant` is a filter
+    // in its own right rather than a facet of the image's `variant` - ADR-2.
+    expect(await items('?method=mlkit&inputVariant=original')).toHaveLength(1);
+    expect((await items(`?parserVersion=${LEGACY_PARSER_VERSION}`)).map((r) => r.method)).toEqual([
+      'gcv',
+    ]);
+    expect((await items(`?timingVersion=${LEGACY_TIMING_VERSION}`)).map((r) => r.method)).toEqual([
+      'vlm',
+    ]);
+  });
+
+  it('filters on the photograph origin, which lives on the image and not on the row', async () => {
+    const camera = await upload(await testImage(64, 64), { source: 'camera' });
+    const gallery = await upload(await testImage(64, 64), { source: 'gallery' });
+
+    await postAttempt(camera.imageId, { method: 'gcv' });
+    await postAttempt(gallery.imageId, { method: 'vlm' });
+
+    // Criterion 3 rests on this working: a gallery import has no capture conditions that were ours
+    // to set, so its runs may never land in a capture-latency figure beside a camera capture's.
+    expect((await items('?source=camera')).map((row) => row.imageId)).toEqual([camera.imageId]);
+    expect((await items('?source=gallery')).map((row) => row.imageId)).toEqual([gallery.imageId]);
+  });
+
+  it('serves whole rows, because the export cannot un-summarise a summary', async () => {
+    const { imageId } = await upload(await testImage(64, 64));
+    await postAttempt(imageId);
+
+    const row = (await items())[0];
+
+    expect(row?.ocr?.rawText).toBe('EXP 12.03.2027');
+    expect(row?.ocr?.engineMsScope).toBe('inference');
+    // Every candidate the parser considered, and the three versioned fields - phase 10 criterion 8.
+    expect(Array.isArray(row?.parse?.candidates)).toBe(true);
+    expect(row?.parserVersion).toBe(PARSER_VERSION);
+    expect(row?.timingVersion).toBe(TIMING_VERSION);
+    expect(row?.pricingVersion).toBe('unset');
+    expect(row?.referenceDate).toBe('2025-06-01');
+  });
+
+  it('pages newest first and never repeats a row across a page boundary', async () => {
+    const { imageId } = await upload(await testImage(64, 64));
+    for (let index = 0; index < 5; index += 1) {
+      await postAttempt(imageId);
+    }
+
+    const first = (await listAll('?limit=2')).json() as { items: Attempt[]; nextCursor: string };
+    expect(first.items).toHaveLength(2);
+    expect(first.nextCursor).not.toBeNull();
+
+    const seen = [...first.items.map((row) => row.id)];
+    let cursor: string | null = first.nextCursor;
+
+    while (cursor !== null) {
+      const page = (await listAll(`?limit=2&cursor=${encodeURIComponent(cursor)}`)).json() as {
+        items: Attempt[];
+        nextCursor: string | null;
+      };
+      seen.push(...page.items.map((row) => row.id));
+      cursor = page.nextCursor;
+    }
+
+    // Five distinct rows, newest first. The four methods of one re-run-all share a millisecond
+    // routinely, so the cursor's `id` tie-breaker is what keeps this true rather than lucky.
+    expect(new Set(seen).size).toBe(5);
+    expect(seen).toHaveLength(5);
+  });
+
+  it('refuses a filter it does not know rather than ignoring it', async () => {
+    // The same failure the image listing is strict against: a server behind the app would otherwise
+    // answer an unknown filter with a full unfiltered page, and the screen would look like it was
+    // filtering. Here that would put two populations into one median.
+    const response = await listAll('?method=gcv&engine=gcv:builtin/stable');
+
+    expect(response.statusCode).toBe(400);
+    expect((response.json() as { message: string }).message).toContain('engine');
+  });
+
+  it('refuses a malformed cursor rather than silently starting over', async () => {
+    expect((await listAll('?cursor=not-a-cursor')).statusCode).toBe(400);
+  });
+
+  it('answers an empty set with an empty page, not with an error', async () => {
+    const response = await listAll('?method=onnx-paddleocr-cyrillic');
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ items: [], nextCursor: null });
+  });
+});
+
 describe('query plans', () => {
   /** The plan for the query the route runs - it is built by the same function - criterion 10. */
   function planFor(query: Record<string, string>, cursor: ListCursor | null = null): string[] {
@@ -1520,6 +1651,69 @@ describe('query plans', () => {
       for (const line of attemptLines) {
         expect(line, plan.join(' | ')).toMatch(/USING (COVERING )?INDEX/);
       }
+    }
+  });
+
+  /** The same check for History's listing, built by the function the route calls. */
+  function attemptPlanFor(
+    query: Record<string, string>,
+    cursor: ListCursor | null = null,
+  ): string[] {
+    const built = attemptListQuery(handle.db, attemptListQuerySchema.parse(query), cursor).toSQL();
+
+    const rows = handle.db.$client
+      .prepare(`EXPLAIN QUERY PLAN ${built.sql}`)
+      .all(...(built.params as never[])) as { detail: string }[];
+
+    return rows.map((row) => row.detail.trim());
+  }
+
+  it('walks the export path in index order rather than sorting each page', () => {
+    // The JSON export pages through the unfiltered listing to exhaustion, so this is the plan that
+    // runs most. A `USE TEMP B-TREE FOR ORDER BY` here would mean SQLite sorting the whole table
+    // once per page; `attempts_createdAt_id_idx` is what stops it, and the plan naming the index is
+    // the evidence rather than the assertion that it exists.
+    const queries: Record<string, string>[] = [{}, { from: '1000', to: '2000' }];
+
+    for (const query of queries) {
+      const plan = attemptPlanFor(query);
+      expect(plan.join(' | '), JSON.stringify(query)).toContain('attempts_createdAt_id_idx');
+      expect(plan.join(' | '), JSON.stringify(query)).not.toContain('TEMP B-TREE FOR ORDER BY');
+    }
+  });
+
+  it('reads every filtered listing out of an index, sorting at most the rows it matched', () => {
+    // A `method` filter takes `attempts_method_inputVariant_idx` and then sorts what it matched,
+    // because no one index can serve an equality on `method` and an ordering on `createdAt` at the
+    // same time. That is a sort over the matched subset, not the table scan this checks for, and
+    // adding a third index on the same leading column to remove it would only buy write cost - the
+    // same trade the image listing documents for its `capturedAt` range.
+    const queries: Record<string, string>[] = [
+      { method: 'gcv' },
+      { method: 'mlkit', inputVariant: 'original' },
+      { parserVersion: PARSER_VERSION },
+      { timingVersion: TIMING_VERSION },
+      { source: 'camera' },
+    ];
+
+    for (const query of queries) {
+      const plan = attemptPlanFor(query);
+      const scans = plan.filter(
+        (detail) => /^SCAN (TABLE )?attempts\b/.test(detail) && !detail.includes('USING'),
+      );
+      expect(scans, `${JSON.stringify(query)}: ${plan.join(' | ')}`).toEqual([]);
+    }
+  });
+
+  it('answers the source filter through the images primary key, not a scan of images', () => {
+    // `source` lives on `images`, and the subquery is what keeps asking for it from costing a scan
+    // per attempt row.
+    const plan = attemptPlanFor({ source: 'camera' });
+    const imageLines = plan.filter((detail) => detail.includes('images'));
+
+    expect(imageLines.length, plan.join(' | ')).toBeGreaterThan(0);
+    for (const line of imageLines) {
+      expect(line, plan.join(' | ')).toMatch(/USING (COVERING )?INDEX|USING INTEGER PRIMARY KEY/);
     }
   });
 });

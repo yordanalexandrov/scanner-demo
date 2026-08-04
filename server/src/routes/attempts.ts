@@ -5,7 +5,9 @@ import {
   apiErrorSchema,
   attemptCreateResponseSchema,
   attemptCreateSchema,
+  attemptListQuerySchema,
   attemptListResponseSchema,
+  attemptPageResponseSchema,
   attemptSchema,
 } from '@scanner-demo/shared';
 import type { Attempt, AttemptCreate } from '@scanner-demo/shared';
@@ -13,6 +15,8 @@ import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { Db } from '../db/client.js';
 import { attempts, images } from '../db/schema.js';
 import type { AttemptRow, NewAttemptRow } from '../db/schema.js';
+import { attemptListQuery } from '../lib/attemptQuery.js';
+import { decodeCursor, encodeCursor } from '../lib/cursor.js';
 import { isImageId } from '../lib/imagePaths.js';
 
 /**
@@ -147,6 +151,49 @@ export function createAttemptRoutes(options: AttemptRoutesOptions): FastifyPlugi
           .run();
 
         return reply.code(201).send({ id });
+      },
+    );
+
+    /**
+     * The filterable benchmark listing - History and the JSON export read it, phase 10 item 7.
+     *
+     * Paginated where the per-image listing below is not: this one walks the whole dataset, and the
+     * export walks it to exhaustion. The rows are served **whole** - raw text, every candidate the
+     * parser considered, `engineMsScope`, and the three versioned fields - because the export
+     * carries full rows and a summary cannot be un-summarised.
+     */
+    fastify.get(
+      '/api/v1/attempts',
+      {
+        schema: {
+          querystring: attemptListQuerySchema,
+          response: { 200: attemptPageResponseSchema, ...ERROR_RESPONSES },
+        },
+      },
+      async (request, reply) => {
+        const query = request.query;
+
+        let cursor = null;
+
+        if (query.cursor !== undefined) {
+          cursor = decodeCursor(query.cursor);
+          if (cursor === null) {
+            return reply.code(400).send({ error: 'bad_request', message: 'Malformed cursor' });
+          }
+        }
+
+        const rows = attemptListQuery(db, query, cursor).all();
+
+        const page = rows.slice(0, query.limit);
+        const last = page.at(-1);
+
+        return reply.send({
+          items: page.map(toAttempt),
+          nextCursor:
+            rows.length > query.limit && last !== undefined
+              ? encodeCursor({ sortKey: last.createdAt, id: last.id })
+              : null,
+        });
       },
     );
 

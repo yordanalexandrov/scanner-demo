@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { groupAttempts } from './attemptGroups.js';
+import { captureCostMs, groupAttempts, groupAttemptsByImage } from './attemptGroups.js';
 import { LEGACY_PARSER_VERSION, PARSER_VERSION } from './parserVersion.js';
 import type { Attempt } from './schemas/attempt.js';
 import type { ExpiryStatus } from './schemas/parse.js';
@@ -263,5 +263,97 @@ describe('groupAttempts', () => {
 
   it('has no group at all for an empty set, rather than an empty group', () => {
     expect(groupAttempts([])).toEqual([]);
+  });
+
+  it('totals the costs it knows and counts the ones it does not - ADR-11', () => {
+    const priced = (costEstimateUsd: number | null): Attempt =>
+      attempt({
+        method: 'gcv',
+        ocr: {
+          engine: 'gcv:builtin/stable',
+          rawText: '',
+          blocks: [],
+          engineMs: 400,
+          engineMsScope: 'inference+network',
+          serverTotalMs: null,
+          imageWidth: 1200,
+          imageHeight: 1600,
+          usage: null,
+          costEstimateUsd,
+          pricingVersion: '2026-08-03',
+        },
+        timing: { ...attempt().timing, engineMs: 400 },
+      });
+
+    const group = groupAttempts([
+      priced(0.0015),
+      priced(0.0015),
+      // A price the table has no figure for, and a run that failed before producing one. Neither is
+      // a free call, and neither may be folded into the total as a zero.
+      priced(null),
+      attempt({ method: 'gcv', error: 'Cloud Vision refused the call' }),
+    ])[0];
+
+    expect(group?.costUsd).toBe(0.003);
+    expect(group?.unpricedCount).toBe(2);
+  });
+
+  it('reports no cost rather than a free one when nothing was priced - ADR-11', () => {
+    const group = groupAttempts([attempt(), attempt()])[0];
+
+    // `0` here would say ML Kit's two runs cost nothing *and* that the figure is known. The first
+    // is true and the second is not, and only one of the two is what a reader takes from `$0.00`.
+    expect(group?.costUsd).toBeNull();
+    expect(group?.unpricedCount).toBe(2);
+  });
+});
+
+describe('captureCostMs', () => {
+  it('sums the capture-side segments, which sit outside every method total - ADR-22', () => {
+    expect(
+      captureCostMs({
+        ...attempt().timing,
+        captureMs: 300,
+        downscaleMs: 120,
+        uploadMs: 480,
+      }),
+    ).toBe(900);
+  });
+
+  it('adds up whichever segments apply, rather than requiring all three', () => {
+    // A gallery import has no capture but does have a downscale and an upload.
+    expect(
+      captureCostMs({ ...attempt().timing, captureMs: null, downscaleMs: 120, uploadMs: 480 }),
+    ).toBe(600);
+  });
+
+  it('is null, never zero, when no capture-side segment applies at all', () => {
+    // A Library re-run reads an image the server already holds: it neither captured nor uploaded
+    // anything. `0` would read as a free capture and drag every average built on it.
+    expect(captureCostMs(attempt().timing)).toBeNull();
+  });
+});
+
+describe('groupAttemptsByImage', () => {
+  it('puts every method for one image on one row, newest activity first', () => {
+    const rows = groupAttemptsByImage([
+      attempt({ imageId: 'image-b', method: 'gcv', createdAt: 300 }),
+      attempt({ imageId: 'image-a', method: 'mlkit', inputVariant: 'upload', createdAt: 100 }),
+      attempt({ imageId: 'image-a', method: 'mlkit', inputVariant: 'original', createdAt: 200 }),
+      attempt({ imageId: 'image-a', method: 'vlm', createdAt: 900 }),
+    ]);
+
+    expect(rows.map((row) => row.imageId)).toEqual(['image-a', 'image-b']);
+    expect(rows[0]?.latestAt).toBe(900);
+    // The four methods read side by side, with the two on-device variants still apart - ADR-2.
+    expect(rows[0]?.groups.map((group) => `${group.method}/${group.inputVariant}`)).toEqual([
+      'mlkit/upload',
+      'mlkit/original',
+      'vlm/upload',
+    ]);
+  });
+
+  it('has no row for an empty set', () => {
+    expect(groupAttemptsByImage([])).toEqual([]);
   });
 });
