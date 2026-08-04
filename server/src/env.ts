@@ -69,6 +69,30 @@ const envSchema = z.object({
   // the server timing out first is what makes a slow engine arrive on the phone as a measurement
   // rather than as noise.
   GCV_TIMEOUT_MS: z.coerce.number().int().min(1).default(30_000),
+
+  // Which VlmProvider implementation serves /api/v1/ocr/vlm - phase 09.
+  //
+  // **A plain string rather than an enum, deliberately.** The interface exists so that benchmarking
+  // a second provider is one new file plus one line in server/src/vlm/index.ts; an enum here would
+  // make this file a third one to edit, and criterion 4 checks that it is not. An unregistered name
+  // is caught by the registry and answered as a 502 naming the known providers, so the typo is
+  // still loud - it just does not take the other three methods down with it.
+  VLM_PROVIDER: z.string().min(1).default('openai'),
+
+  // The concrete model, and half of the engine string `vlm:<provider>/<model>`, which is also the
+  // price-table key - ADR-11. Changing it produces attempts under a new key and leaves the earlier
+  // rows saying which model produced them - criterion 9.
+  //
+  // Unlike GCV's pin this one IS an environment variable, because comparing two models is a thing
+  // this benchmark is for. The safety net is the price table rather than the type: a model with no
+  // entry yields `costEstimateUsd: null`, which is an honest "not priced" rather than a number
+  // borrowed from a different model.
+  VLM_MODEL: z.string().min(1).default('gpt-5.4-mini'),
+
+  // Explicit limit on the whole VLM call. Keep it BELOW the app's own 45 s round-trip timeout
+  // (app/src/api/ocr.ts), for the reason the other two engines' limits are: the server timing out
+  // first is what makes a slow model arrive on the phone as a measurement rather than as noise.
+  VLM_TIMEOUT_MS: z.coerce.number().int().min(1).default(40_000),
 });
 
 export type Env = z.infer<typeof envSchema> & {
@@ -76,6 +100,15 @@ export type Env = z.infer<typeof envSchema> & {
   imageDir: string;
   thumbDir: string;
   databasePath: string;
+  /**
+   * The source this was validated from, carried along for the VLM providers - phase 09.
+   *
+   * A provider reads its own credential variable out of this rather than having it declared above,
+   * so adding a second provider stays a one-file change - see `vlm/types.ts`, `VlmProviderConfig`.
+   * It is passed through rather than reached for as `process.env`, so a test configures a provider
+   * by building an `Env` like every other test does instead of mutating the process.
+   */
+  raw: Readonly<Partial<Record<string, string>>>;
 };
 
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
@@ -90,6 +123,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
 
   return {
     ...parsed.data,
+    raw: source,
     imageDir: path.resolve(parsed.data.IMAGE_DIR),
     thumbDir: path.resolve(parsed.data.THUMB_DIR),
     databasePath: path.resolve(parsed.data.DATABASE_PATH),

@@ -10,9 +10,12 @@ import {
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import type { Env } from './env.js';
 import type { Db } from './db/client.js';
+import { vlmOcrResponseSchema } from '@scanner-demo/shared';
 import { createGcvEngine } from './engines/gcv.js';
 import { createLocalOcrEngine } from './engines/localOcr.js';
+import { createVlmEngine } from './engines/vlm.js';
 import type { OcrEngine } from './engines/types.js';
+import { selectVlmProvider } from './vlm/index.js';
 import { InvalidImagePathError } from './lib/imagePaths.js';
 import authPlugin from './plugins/auth.js';
 import multipartPlugin from './plugins/multipart.js';
@@ -27,12 +30,14 @@ export interface BuildServerOptions {
   db: Db;
   /**
    * The self-hosted engine, injectable so a test can stand a stub in front of the route without a
-   * container. The process builds the real one from the environment - phase 09 adds its own beside
-   * these, behind the same interface.
+   * container. The process builds the real one from the environment - all three server-side engines
+   * are behind the same interface.
    */
   localOcrEngine?: OcrEngine;
   /** Google Cloud Vision, injectable for the same reason: a test must not call a billed API. */
   gcvEngine?: OcrEngine;
+  /** The VLM, injectable for the same reason again - a test must not spend tokens - phase 09. */
+  vlmEngine?: OcrEngine;
 }
 
 /**
@@ -56,6 +61,22 @@ export async function buildServer(options: BuildServerOptions): Promise<FastifyI
     createGcvEngine({
       timeoutMs: env.GCV_TIMEOUT_MS,
       credentialsPath: env.GOOGLE_APPLICATION_CREDENTIALS ?? null,
+    });
+
+  // Constructing this costs nothing and calls nothing either: no HTTP client is built, no key is
+  // checked. A server with no `OPENAI_API_KEY`, or with a `VLM_PROVIDER` nobody registered, starts
+  // and serves exactly as it did before phase 09 - the failure surfaces on the VLM endpoint alone.
+  const vlmEngine =
+    options.vlmEngine ??
+    createVlmEngine({
+      provider: selectVlmProvider({
+        provider: env.VLM_PROVIDER,
+        model: env.VLM_MODEL,
+        timeoutMs: env.VLM_TIMEOUT_MS,
+        // The provider reads its own credential from here - see `vlm/types.ts` for why it is not
+        // declared in `env.ts`.
+        env: env.raw,
+      }),
     });
 
   fs.mkdirSync(env.imageDir, { recursive: true });
@@ -125,6 +146,14 @@ export async function buildServer(options: BuildServerOptions): Promise<FastifyI
       endpoints: [
         { url: '/api/v1/ocr/local', engine: localOcrEngine, label: 'the OCR sidecar' },
         { url: '/api/v1/ocr/gcv', engine: gcvEngine, label: 'Google Cloud Vision' },
+        {
+          url: '/api/v1/ocr/vlm',
+          engine: vlmEngine,
+          label: 'the VLM',
+          // The one endpoint whose body is wider than an `OcrResponse`. Without this the serialiser
+          // would strip the model's own answer and the prompt version on the way out - ADR-24.
+          responseSchema: vlmOcrResponseSchema,
+        },
       ],
     }),
   );

@@ -19,6 +19,18 @@ export interface OcrEndpoint {
   engine: OcrEngine;
   /** What the logs call it when it fails. The engine string is a price key, not a sentence. */
   label: string;
+  /**
+   * What this endpoint's 200 body is validated and serialised against. Defaults to the shared
+   * `OcrResponse`, which is what three of the four methods return.
+   *
+   * **It is per endpoint because the serialiser strips what the schema does not name.** The VLM
+   * returns three fields more than an `OcrResponse` - the model's own answer and the prompt version
+   * - and a single shared schema here would drop them silently on the way out, leaving an endpoint
+   * that looks like it works and an attempt row that cannot be attributed to a prompt. Declaring it
+   * per endpoint is also what keeps those fields *off* the other three: an optional field on the
+   * shared schema would let any engine ship a `parsedDate` that nothing checks - ADR-24.
+   */
+  responseSchema?: z.ZodType;
 }
 
 export interface OcrRoutesOptions {
@@ -74,13 +86,13 @@ export function createOcrRoutes(options: OcrRoutesOptions): FastifyPluginAsyncZo
   const { db, imageDir, endpoints } = options;
 
   return async (fastify) => {
-    for (const { url, engine, label } of endpoints) {
+    for (const { url, engine, label, responseSchema } of endpoints) {
       fastify.post(
         url,
         {
           schema: {
             body: ocrBodySchema,
-            response: { 200: ocrResponseSchema, ...ERROR_RESPONSES },
+            response: { 200: responseSchema ?? ocrResponseSchema, ...ERROR_RESPONSES },
           },
         },
         async (request, reply) => {

@@ -11,8 +11,13 @@ import type { OcrResponse } from '@scanner-demo/shared';
  *
  * It is also what makes the in-process migration the specification leaves open - a TypeScript ONNX
  * wrapper instead of a container - a one-file change rather than a rewrite.
+ *
+ * `TResponse` widens the *result*, never the contract: it must extend `OcrResponse`, so every field
+ * the comparison rests on is present on every engine. Phase 09 is the one user of it - the VLM
+ * returns its own answer and its prompt version alongside, and both have to survive serialisation,
+ * which is why each endpoint declares the schema its engine actually returns - ADR-24.
  */
-export interface OcrEngine {
+export interface OcrEngine<TResponse extends OcrResponse = OcrResponse> {
   /** Doubles as the price-table key and as the `engine` field of every response - ADR-11. */
   readonly name: string;
   recognise(input: {
@@ -27,7 +32,7 @@ export interface OcrEngine {
      * Optional, so an engine that cannot cancel simply ignores it rather than pretending.
      */
     signal?: AbortSignal;
-  }): Promise<OcrResponse>;
+  }): Promise<TResponse>;
 }
 
 /**

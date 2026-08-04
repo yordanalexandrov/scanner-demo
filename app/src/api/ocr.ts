@@ -1,5 +1,6 @@
-import { ocrRequestSchema, ocrResponseSchema } from '@scanner-demo/shared';
-import type { OcrResponse } from '@scanner-demo/shared';
+import { ocrRequestSchema, ocrResponseSchema, vlmOcrResponseSchema } from '@scanner-demo/shared';
+import type { OcrResponse, VlmOcrResponse } from '@scanner-demo/shared';
+import type { z } from 'zod';
 import { apiPost } from './client';
 
 /**
@@ -27,18 +28,27 @@ import { apiPost } from './client';
  */
 const OCR_TIMEOUT_MS = 45_000;
 
-/** One request shape, one response schema, one timeout - the endpoint is all that differs. */
-function recogniseOnServer(url: string, imageId: string): Promise<OcrResponse> {
-  // Built through the shared schema rather than as an object literal. The server validates the very
-  // same schema, so a field that is renamed there stops compiling here instead of turning into a
-  // 400 that only a deployed APK ever sees.
-  return apiPost(url, ocrRequestSchema.parse({ imageId }), ocrResponseSchema, {
+/**
+ * One request shape, one timeout - the endpoint and its response schema are all that differs.
+ *
+ * The schema is a parameter rather than a constant because the VLM endpoint returns three fields
+ * more than the other two, and it is the *same* schema the server declared for that route - so a
+ * field renamed in `packages/shared` stops compiling on both sides at once instead of turning into
+ * a stripped field that only a deployed APK ever sees.
+ */
+function recogniseOnServer<TResponse extends OcrResponse>(
+  url: string,
+  imageId: string,
+  schema: z.ZodType<TResponse>,
+): Promise<TResponse> {
+  // Built through the shared schema rather than as an object literal, for the same reason.
+  return apiPost(url, ocrRequestSchema.parse({ imageId }), schema, {
     timeoutMs: OCR_TIMEOUT_MS,
   });
 }
 
 export function recogniseWithSelfHostedOcr(imageId: string): Promise<OcrResponse> {
-  return recogniseOnServer('/api/v1/ocr/local', imageId);
+  return recogniseOnServer('/api/v1/ocr/local', imageId, ocrResponseSchema);
 }
 
 /**
@@ -49,5 +59,20 @@ export function recogniseWithSelfHostedOcr(imageId: string): Promise<OcrResponse
  * handset carries, and it opens this API rather than a billed one - spec, § Hard constraint.
  */
 export function recogniseWithGcv(imageId: string): Promise<OcrResponse> {
-  return recogniseOnServer('/api/v1/ocr/gcv', imageId);
+  return recogniseOnServer('/api/v1/ocr/gcv', imageId, ocrResponseSchema);
+}
+
+/**
+ * The VLM - **called through this server, never from here** - phase 09.
+ *
+ * There is no OpenAI SDK in this app, no API key in this app, and no code path that could add one
+ * without the secret scanning noticing. The bearer token in the APK is the only credential the
+ * handset carries, and it opens this API rather than a billed one - spec, § Hard constraint.
+ *
+ * The response is wider than the other two: it carries the model's own `parsedDate` and reasoning,
+ * and the version of the prompt that produced them. The app records all three on the attempt beside
+ * the shared parser's reading of the same raw text - ADR-15, ADR-24.
+ */
+export function recogniseWithVlm(imageId: string): Promise<VlmOcrResponse> {
+  return recogniseOnServer('/api/v1/ocr/vlm', imageId, vlmOcrResponseSchema);
 }

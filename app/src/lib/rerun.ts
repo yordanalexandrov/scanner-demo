@@ -168,6 +168,17 @@ export function rerunGcv(input: RerunInput): Promise<RunMethodResult> {
 }
 
 /**
+ * The VLM over a stored image - phase 09.
+ *
+ * This is the path that makes criterion 6 observable: five presses produce five attempt rows, and
+ * the Library's grouped view shows the spread. The non-determinism is the finding, which is why
+ * nothing here retries, de-duplicates or averages on the way in.
+ */
+export function rerunVlm(input: RerunInput): Promise<RunMethodResult> {
+  return rerunOnServer(input, 'vlm');
+}
+
+/**
  * One re-run of one method, dispatched by name.
  *
  * The single place that decides which function a method maps to on this path. The detail screen's

@@ -58,6 +58,17 @@ function Run({ attempt }: { attempt: Attempt }) {
         </Text>
       )}
 
+      {attempt.vlm !== null && (
+        // The model's own answer, per run, beside the parser's above. Five runs of one image are
+        // five rows here, and the spread this exposes is a spread in *both* columns: a VLM can
+        // return a different date on the same pixels, and a summary that showed only the parser's
+        // reading would hide the half of the non-determinism that comes from the model - phase 09
+        // criterion 6.
+        <Text style={styles.caption}>
+          model said {attempt.vlm.parsedDate ?? 'no date'} · prompt {attempt.promptVersion ?? 'n/a'}
+        </Text>
+      )}
+
       <Text style={styles.caption}>
         engine {formatMs(attempt.timing.engineMs)} · parse {formatMs(attempt.timing.parseMs)} ·
         download {formatMs(attempt.timing.downloadMs)}
@@ -74,12 +85,20 @@ function Cohort({ cohort }: { cohort: AttemptSummaryCohort }) {
     <View style={styles.cohort}>
       <View style={styles.cohortHeader}>
         <Text style={styles.cohortVersion}>
-          {cohort.parserVersion} · {cohort.timingVersion}
+          {/* The engine leads, because it is the half of the key a reader is most likely to be
+              comparing: one `method` can be several models - ADR-24. `no engine` is the cohort of
+              runs that failed before producing one, never a missing label. */}
+          {cohort.engine ?? 'no engine'}
         </Text>
         <Text style={styles.runCount}>
           {cohort.runCount} run{cohort.runCount === 1 ? '' : 's'}
         </Text>
       </View>
+
+      <Text style={styles.cohortVersion}>
+        {cohort.parserVersion} · {cohort.timingVersion}
+        {cohort.promptVersion === null ? '' : ` · ${cohort.promptVersion}`}
+      </Text>
 
       <View style={styles.medians}>
         <Text style={styles.medianLabel}>median method total</Text>
@@ -111,7 +130,10 @@ function Group({ group }: { group: AttemptGroup }) {
       </View>
 
       {group.cohorts.map((cohort) => (
-        <Cohort key={`${cohort.parserVersion}-${cohort.timingVersion}`} cohort={cohort} />
+        <Cohort
+          key={`${cohort.parserVersion}-${cohort.timingVersion}-${cohort.engine ?? ''}-${cohort.promptVersion ?? ''}`}
+          cohort={cohort}
+        />
       ))}
 
       {group.attempts.map((attempt) => (

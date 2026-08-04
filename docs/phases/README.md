@@ -74,7 +74,7 @@ four once the remaining engines exist, so it blocks 07 rather than following it.
 | [06b](06b-parser-and-timing-fixes.md) | Parser and timing corrections | complete | Recorded-block fixtures, re-runs, method totals that reconcile |
 | [07](07-ocr-sidecar.md) | Self-hosted OCR sidecar | complete | **Two stops:** spike report, then build-out |
 | [08](08-gcv.md) | Google Cloud Vision engine | complete | GCV over existing library images |
-| [09](09-vlm.md) | VLM engine | not started | Model answer vs parser answer, provider swap |
+| [09](09-vlm.md) | VLM engine | awaiting review | Model answer vs parser answer, provider swap |
 | [10](10-history.md) | History and JSON export | not started | The POC's actual deliverable |
 
 Phase 06's server-side criteria (2, 3, 9, 10) are covered by tests. The rest were verified on an SM-S928B
