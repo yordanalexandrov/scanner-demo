@@ -76,12 +76,21 @@ function Cell({ group }: { group: AttemptGroup }) {
 
 export function ImageAttemptRow({ row, image, onPress }: ImageAttemptRowProps) {
   return (
-    <Pressable
-      accessibilityRole="button"
-      style={({ pressed }) => [styles.container, pressed && styles.pressed]}
-      onPress={() => onPress(row)}
-    >
-      <View style={styles.header}>
+    <View style={styles.container}>
+      {/**
+       * Only the header opens the capture, and that is a fix rather than a preference.
+       *
+       * With the whole card pressable, the press won the touch responder from the horizontal
+       * ScrollView below and a sideways drag navigated away instead of scrolling. Verified on an
+       * SM-S928B on 2026-08-04 against a row with seven `(method, inputVariant)` columns: the four
+       * past the third could not be reached at all, which is acceptance criterion 1 failing while
+       * looking like it passed. The cells are data to be read across, not a link.
+       */}
+      <Pressable
+        accessibilityRole="button"
+        style={({ pressed }) => [styles.header, pressed && styles.pressed]}
+        onPress={() => onPress(row)}
+      >
         {/* The thumbnail, never the full image: a list of full-resolution photographs would move
             tens of megabytes to draw squares 64px wide. */}
         <Image source={thumbnailSourceFor(row.imageId)} style={styles.thumbnail} />
@@ -101,16 +110,17 @@ export function ImageAttemptRow({ row, image, onPress }: ImageAttemptRowProps) {
             {row.imageId}
           </Text>
         </View>
-      </View>
+      </Pressable>
 
       {/* Horizontal, because four methods across a phone is what "side by side" means here and
-          wrapping them into a grid would put two of the four below the fold. */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.cells}>
+          wrapping them into a grid would put two of the four below the fold. The scrollbar stays
+          visible: with more columns than fit, nothing else says there are more to read. */}
+      <ScrollView horizontal showsHorizontalScrollIndicator style={styles.cells}>
         {row.groups.map((group) => (
           <Cell key={`${group.method}-${group.inputVariant}`} group={group} />
         ))}
       </ScrollView>
-    </Pressable>
+    </View>
   );
 }
 

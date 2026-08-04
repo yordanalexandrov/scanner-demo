@@ -119,6 +119,32 @@ why it was rejected, `engineMsScope`, `referenceDate`, `pricingVersion`, `parser
     the self-hosted one.
     — [ADR-18](../decisions.md#adr-18--the-benchmark-shares-the-box-with-production)
 
+## Verified on device
+
+SM-S928B (Android 16), release build, 2026-08-04, against `scanner.yo-po.eu` carrying the phase 07–09
+dataset: **79 attempts over 18 images, all four methods, three `parserVersion`s and both
+`timingVersion`s.**
+
+| Criterion | Evidence |
+|---|---|
+| 1 | Rows per source image with thumbnail, `source`, dimensions and the `(method, inputVariant)` cells across. The richest row has **7 columns over 12 attempts**. |
+| 2 | `source=camera` narrowed 79 → 77 runs and 18 → 17 images, on the rows and in the summary together; the server answers 77 and 2 for the two values, so the split is exact. `mlkit · upload` splits into three labelled cohorts — `parser-v1 · shutter-v1` at **4158.4 ms**, `parser-v2 · method-v2` at 488.3 ms, `parser-v3 · method-v2` at 541.1 ms. One median over all three would be true of none. |
+| 3 | With `source` unset every group prints "No capture figure: filter Source to Camera or Gallery first" instead of a number. With it set to Camera, `mlkit · upload` reports **1666.7 ms over 6 capture(s)** — deduplicated by image, because a capture is paid once and read by every method. Groups whose runs are all Library re-runs report `n/a · 0 capture(s)`, never `0 ms`. |
+| 4 | `mlkit · upload` (24 runs) and `mlkit · original` (13) are separate rows, as are `gcv · upload`/`gcv · original` and `onnx-paddleocr · upload`/`onnx-paddleocr · original`. |
+| 5 | Every extraction rate carries "expired counts as extracted"; `gcv · upload` reads 63% · 5/8 on a set whose dates are mostly in the past. |
+| 6–9 | `pnpm --filter @scanner-demo/server verify:export` over the file the phone wrote: validated against `benchmarkExportSchema`, 76 of 77 rows carrying raw OCR text verbatim (the 77th is the recorded VLM failure, which has no `ocr` block by definition), `filters.source: "camera"` recorded, 34 images — both variants of 17 capture groups. |
+| 7 | Every median in the file matches the screen exactly, recomputed by an implementation that does not call the shared one: 4158.4 / 488.3 / 541.1 ms for the three `mlkit · upload` cohorts, 499.4 ms for `gcv · upload`, 2505.2 and 8934.8 ms for the two VLM models. Costs likewise: $0.0120 for eight Vision calls, and $0.0159 + $0.0125 = $0.0284 for the VLM with one run unpriced and excluded rather than counted as free. |
+
+Two things the run also produced:
+
+- **A defect, found and fixed.** The row's horizontal `ScrollView` sat inside the `Pressable` that
+  opens the capture, so a sideways drag navigated away instead of scrolling and the columns past the
+  third were unreachable — criterion 1 failing while looking like it passed. Only the header opens
+  the capture now.
+- **The barcode array is empty on this server**, so criterion 9 is satisfied vacuously there. It was
+  exercised properly against a local database holding 57 scans: all 57 in `barcodeScans`, none in
+  `attempts`.
+
 ## Risks / unknowns
 
 - Export size: full raw text and candidate lists for a few hundred attempts is large but manageable. If
