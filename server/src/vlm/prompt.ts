@@ -22,8 +22,13 @@ import { z } from 'zod';
  * sentence from a reworded rule. The schema counts too: it is half of what the model was asked for.
  *
  * - `prompt-v1` - the original.
+ * - `prompt-v2` - says that a two-digit year is a year. Under v1 the model read `24/10/21` off a
+ *   dot-matrix stamp and then argued with itself in the reasoning field about whether `21` counted,
+ *   answering `null` on two runs and `2021-10-24` on a third **from the same transcription**. That
+ *   is the prompt being ambiguous, not the model interpreting: ADR-16 settled the question for the
+ *   parser and v1 simply failed to say it here.
  */
-export const PROMPT_VERSION = 'prompt-v1';
+export const PROMPT_VERSION = 'prompt-v2';
 
 /**
  * Three conventions in here exist to make the model's answer **comparable with the shared parser's
@@ -34,11 +39,21 @@ export const PROMPT_VERSION = 'prompt-v1';
  * - a month-only date resolves to the **last day** of that month, which is what ADR-8 makes the
  *   parser do;
  * - a date with no year is **not a date**, which is what ADR-23 makes the parser do;
+ * - a **two-digit year is a year**, expanded into the century nearest the present, which is what
+ *   ADR-16 makes the parser do;
  * - where a production date and an expiry date are both printed, the **expiry** one is the answer,
  *   which is what the parser's `latest-of-pair` rule does.
  *
  * That is alignment of conventions, not tuning: it does not tell the model what to read or where to
  * look, and every image gets it identically.
+ *
+ * **What is deliberately left unstated: what to do with a single unlabelled date.** The parser takes
+ * it - that is the `sole-candidate` rule - and the model is not told to. The two therefore disagree
+ * on packaging that prints one bare stamp, and that disagreement is a measurement rather than a
+ * defect: a lone `24/10/21` read in 2026 may well be a production date, and a model that declines it
+ * is exercising exactly the judgement this method exists to price against an engine that cannot.
+ * Handing the model the parser's rule ladder would delete the interpretation half of item 4 and
+ * leave the two columns differing only on reading.
  *
  * The instruction to transcribe *everything* rather than only the date is what makes the raw text
  * worth having. It is the text the shared parser is then run over, on the phone, exactly as it is
@@ -58,7 +73,11 @@ Return two separate things.
      it is not the answer.
    - Answer in ISO format, YYYY-MM-DD.
    - If only a month and a year are printed, answer with the LAST day of that month.
-   - If no year is printed, answer null. A date without a year is not a date.
+   - A two-digit year IS a year. Expand it into the century that puts the date nearest to the
+     present: in 24/10/21 the year is 2021, not 1921 and not missing. Do not reject a date because
+     its year is printed with two digits, and do not change the date to make it a future one.
+   - Only a date with no year component at all - 24/10, or 24/07 - is answered null. A date without
+     a year is not a date.
    - If you cannot find an expiry date, answer null. Never guess a plausible date.
 
 Also give at most two short sentences saying which printed text you used and why.`;
