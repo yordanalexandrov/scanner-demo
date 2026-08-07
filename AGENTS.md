@@ -123,3 +123,20 @@ The repository is public and API keys compiled into an APK are extractable with 
   values** — when a new variable is introduced, add it there in the same commit.
 - Never commit a service-account JSON, an API key, or a token. If one is needed to test, put it in
   `.env` and reference it by variable name.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live as GitHub issues in `yordanalexandrov/scanner-demo`, driven through the `gh` CLI. See
+`docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical triage roles, each label string equal to its name. See
+`docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `CONTEXT.md` at the root, ADRs in `docs/decisions.md`. See
+`docs/agents/domain.md`.
